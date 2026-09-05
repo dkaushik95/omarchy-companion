@@ -1,0 +1,14 @@
+[Unit]
+Description=Omarchy Companion phone dashboard
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=@NODE@ %h/.local/share/omarchy-companion/server/companion.mjs serve
+Restart=on-failure
+RestartSec=3
+Environment=OMARCHY_COMPANION_HOST=0.0.0.0
+Environment=OMARCHY_COMPANION_PORT=8787
+
+[Install]
+WantedBy=default.target

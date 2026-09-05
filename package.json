@@ -1,0 +1,11 @@
+{
+  "name": "omarchy-companion",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server/companion.mjs serve",
+    "pair": "node server/companion.mjs pair",
+    "test": "node --check server/companion.mjs && node --check web/app.js"
+  }
+}

@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#0d0e11">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Companion">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="apple-touch-icon" href="/api/logo">
+    <link rel="icon" type="image/png" href="/api/logo">
+    <link rel="stylesheet" href="/app.css?v=20">
+    <title>Omarchy Companion</title>
+  </head>
+  <body>
+    <div id="root">
+      <!-- Top App Header -->
+      <header class="app-header">
+        <div class="header-brand">
+          <img src="/api/logo" alt="Omarchy" class="header-logo" onerror="this.style.display='none'">
+          <span class="header-title">Omarchy Companion</span>
+        </div>
+      </header>
+
+      <!-- Main Scrollable Content -->
+      <main class="main-content" id="main-content">
+        <!-- Tab 1: Workspace (Only visible on Workspace tab) -->
+        <section class="tab-panel active" id="tab-panel-workspace">
+          <!-- Workspaces Tabs Row -->
+          <div class="workspaces-section">
+            <div class="section-label-row">
+              <span class="section-label">WORKSPACES</span>
+              <span class="section-active-badge" id="active-workspace-badge">Workspace 1</span>
+            </div>
+            <div class="workspaces-tabs" id="workspaces-tabs" role="tablist">
+              <!-- Rendered dynamically: Workspace 1, 2, 3... -->
+            </div>
+          </div>
+
+          <!-- Workspace Canvas Representation -->
+          <div class="canvas-section">
+            <div class="canvas-container" id="canvas-container">
+              <div class="monitor-frame" id="monitor-frame">
+                <div class="monitor-bar-preview">
+                  <span class="monitor-bar-title" id="monitor-focused-title">Desktop</span>
+                  <button class="btn-canvas-add-app" id="btn-canvas-add-app" title="Launch app on this workspace">+ App</button>
+                </div>
+                <div class="monitor-workspace-surface" id="monitor-surface">
+                  <!-- Live Drop Preview for Split / Swap -->
+                  <div class="canvas-drop-preview" id="canvas-drop-preview">
+                    <div class="drop-preview-content">
+                      <span class="drop-preview-icon" id="drop-preview-icon">󱂬</span>
+                      <span class="drop-preview-label" id="drop-preview-label">Split Left</span>
+                    </div>
+                  </div>
+                  <!-- Windows rendered as draggable rectangles with icons -->
+                  <div class="surface-placeholder" id="surface-placeholder">
+                    <span>No windows in this workspace</span>
+                    <button class="btn-subtle" id="btn-quick-launch">Launch App</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="canvas-hint">Drag windows to rearrange • Tap window for options</div>
+          </div>
+        </section>
+
+        <!-- Tab 2: Interactions (Mouse & Keyboard) -->
+        <section class="tab-panel" id="tab-panel-interactions">
+          <!-- Giant Trackpad Surface -->
+          <div class="panel-card trackpad-card">
+            <div class="trackpad-wrapper">
+              <div class="trackpad-surface" id="trackpad-surface">
+                <div class="trackpad-grid"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Bottom Pinned Controls (Input & Scrollable Keys) -->
+          <div class="interactions-dock">
+            <!-- Minimal Input to PC Cursor -->
+            <form id="form-type-to-pc" class="quick-type-form">
+              <div class="quick-type-wrapper">
+                <textarea 
+                  id="input-type-text" 
+                  class="quick-type-input" 
+                  placeholder="Type to send..." 
+                  enterkeyhint="send"
+                  rows="1"
+                  autocomplete="on" 
+                  autocorrect="on" 
+                  autocapitalize="sentences" 
+                  spellcheck="true"
+                ></textarea>
+                <button type="submit" class="quick-type-send-btn" id="btn-quick-type-send" title="Send to PC">
+                  <span>󰒭</span>
+                </button>
+              </div>
+            </form>
+
+            <!-- Horizontally Scrollable Desktop Keys -->
+            <div class="special-keys-scroll">
+              <button class="key-btn" data-key="enter">Enter</button>
+              <button class="key-btn" data-key="esc">Esc</button>
+              <button class="key-btn" data-key="tab">Tab</button>
+              <button class="key-btn" data-key="super">Super</button>
+              <button class="key-btn" data-key="alttab">Alt+Tab</button>
+              <button class="key-btn" data-key="copy">Copy</button>
+              <button class="key-btn" data-key="paste">Paste</button>
+              <button class="key-btn" data-key="undo">Undo</button>
+              <button class="key-btn" data-key="backspace">⌫</button>
+              <button class="key-btn" data-key="up">▲</button>
+              <button class="key-btn" data-key="down">▼</button>
+              <button class="key-btn" data-key="left">◀</button>
+              <button class="key-btn" data-key="right">▶</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Tab 3: Controls (Panels list & quick toggles) -->
+        <section class="tab-panel" id="tab-panel-controls">
+          <div class="panel-card">
+            <div class="card-header">
+              <span class="card-title">Omarchy Desktop Panels</span>
+              <span class="card-subtitle">Tap to summon/toggle on your PC</span>
+            </div>
+            <div class="panels-grid" id="panels-list">
+              <!-- Dynamically populated from /api/panels -->
+            </div>
+          </div>
+
+          <div class="panel-card">
+            <div class="card-header">
+              <span class="card-title">Quick PC Toggles</span>
+            </div>
+            <div class="quick-toggles-grid">
+              <button class="toggle-btn" data-action="toggle-nightlight">
+                <span class="toggle-icon">󰔎</span>
+                <span class="toggle-name">Night Light</span>
+              </button>
+              <button class="toggle-btn" data-action="toggle-touchpad">
+                <span class="toggle-icon">󰟸</span>
+                <span class="toggle-name">Touchpad</span>
+              </button>
+              <button class="toggle-btn" data-action="toggle-notifications">
+                <span class="toggle-icon">󰂛</span>
+                <span class="toggle-name">Silence DND</span>
+              </button>
+              <button class="toggle-btn" data-action="lock">
+                <span class="toggle-icon"></span>
+                <span class="toggle-name">Lock Screen</span>
+              </button>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <!-- Bottom Floating Navigation Bar -->
+      <nav class="bottom-nav">
+        <!-- Tab 1: Workspaces -->
+        <button class="nav-item active" data-tab="workspace" id="nav-tab-workspace">
+          <span class="nav-icon">󱂬</span>
+          <span class="nav-label">Workspace</span>
+        </button>
+
+        <!-- Tab 2: Omarchy Menu -->
+        <button class="nav-item" id="btn-omarchy-menu" aria-label="Open Omarchy Menu">
+          <span class="nav-icon">󰍜</span>
+          <span class="nav-label">Omarchy Menu</span>
+        </button>
+
+        <!-- Tab 2: Interactions -->
+        <button class="nav-item" data-tab="interactions" id="nav-tab-interactions">
+          <span class="nav-icon">󰍽</span>
+          <span class="nav-label">Interactions</span>
+        </button>
+
+        <!-- Tab 3: Controls -->
+        <button class="nav-item" data-tab="controls" id="nav-tab-controls">
+          <span class="nav-icon"></span>
+          <span class="nav-label">Controls</span>
+        </button>
+      </nav>
+
+      <!-- Super + Space Omarchy Menu Modal -->
+      <div class="modal-backdrop" id="modal-omarchy-menu">
+        <div class="omarchy-menu-card" id="omarchy-menu-window">
+          <!-- Top Search Header with Go... -->
+          <div class="menu-search-header">
+            <div class="menu-search-box">
+              <span class="menu-search-icon"></span>
+              <input type="text" id="launcher-search" class="omarchy-search-input" placeholder="Go..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+              <button class="search-clear-btn" id="btn-clear-search" style="display:none;">✕</button>
+            </div>
+            <button class="btn-icon modal-close-btn" id="btn-close-launcher">✕</button>
+          </div>
+
+          <!-- Launcher Options Bar: Tile in workspace option -->
+          <div class="launcher-options-bar">
+            <label class="launcher-option-label" title="Tile window directly in workspace layout instead of floating centered">
+              <input type="checkbox" id="toggle-launcher-tile" class="launcher-option-checkbox" checked>
+              <span class="launcher-option-custom"></span>
+              <span class="launcher-option-text">Tile in workspace (not center)</span>
+            </label>
+          </div>
+
+          <!-- Breadcrumb Navigation Bar (visible when inside a submenu) -->
+          <div class="menu-nav-breadcrumb" id="menu-nav-breadcrumb" style="display:none;">
+            <button class="btn-menu-back" id="btn-menu-back">
+              <span class="back-icon">‹</span>
+              <span class="back-text" id="menu-back-text">Go</span>
+            </button>
+            <span class="menu-current-title" id="menu-current-title">Apps</span>
+          </div>
+
+          <!-- Menu Items List -->
+          <div class="omarchy-menu-list" id="launcher-content" role="menu">
+            <!-- Dynamically rendered rows -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Window Options Action Sheet -->
+      <div class="modal-backdrop" id="modal-window-actions">
+        <div class="modal-sheet action-sheet">
+          <div class="sheet-drag-handle"></div>
+          <div class="window-sheet-header">
+            <img src="/api/logo" alt="App" class="window-sheet-icon" id="sheet-window-icon">
+            <div class="window-sheet-info">
+              <h3 class="window-sheet-title" id="sheet-window-title">Window Title</h3>
+              <span class="window-sheet-class" id="sheet-window-class">App Class</span>
+            </div>
+            <button class="btn-icon modal-close-btn" id="btn-close-window-sheet">✕</button>
+          </div>
+
+          <div class="window-sheet-actions">
+            <button class="action-sheet-btn primary" id="btn-action-focus">
+              <span class="action-btn-icon">󰍹</span>
+              <span class="action-btn-label">Focus Window</span>
+            </button>
+            <button class="action-sheet-btn" id="btn-action-tile">
+              <span class="action-btn-icon" id="icon-action-tile">󰹟</span>
+              <span class="action-btn-label" id="label-action-tile">Tile into Workspace</span>
+            </button>
+            <button class="action-sheet-btn" id="btn-action-fullscreen">
+              <span class="action-btn-icon" id="icon-action-fullscreen">󰊓</span>
+              <span class="action-btn-label" id="label-action-fullscreen">Full Screen</span>
+            </button>
+            <div id="sheet-swaps-list" class="sheet-swaps-container"></div>
+            <button class="action-sheet-btn danger" id="btn-action-close">
+              <span class="action-btn-icon">󰅖</span>
+              <span class="action-btn-label">Close App</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Toast Feedback -->
+      <div class="toast-container" id="toast-container"></div>
+    </div>
+
+    <script type="module" src="/app.js?v=24"></script>
+  </body>
+</html>

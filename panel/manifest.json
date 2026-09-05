@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "custom.omarchy-companion",
+  "name": "Omarchy Companion",
+  "version": "0.1.0",
+  "author": "User",
+  "description": "Pair a phone with the Omarchy Companion PWA and show its server status.",
+  "kinds": ["bar-widget"],
+  "entryPoints": { "barWidget": "Panel.qml" },
+  "barWidget": {
+    "displayName": "Companion",
+    "description": "Phone companion pairing and status.",
+    "category": "Controls",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

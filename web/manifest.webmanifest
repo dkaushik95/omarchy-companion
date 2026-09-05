@@ -1,0 +1,28 @@
+{
+  "name": "Omarchy Companion",
+  "short_name": "Companion",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0d0e11",
+  "theme_color": "#0d0e11",
+  "icons": [
+    {
+      "src": "/icon.png",
+      "sizes": "300x300",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/api/logo",
+      "sizes": "300x300",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
