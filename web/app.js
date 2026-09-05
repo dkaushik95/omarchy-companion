@@ -79,7 +79,6 @@ const el = {
   formTypeToPc: document.getElementById("form-type-to-pc"),
   inputTypeText: document.getElementById("input-type-text"),
   btnQuickTypeSend: document.getElementById("btn-quick-type-send"),
-  panelsList: document.getElementById("panels-list"),
   toggleBtns: document.querySelectorAll(".toggle-btn[data-action]"),
   volumeBadge: document.getElementById("volume-badge"),
   btnVolMute: document.getElementById("btn-vol-mute"),
@@ -847,9 +846,6 @@ function switchTab(tabName) {
 
   if (tabName === "controls") {
     loadControlsState();
-    if (!el.panelsList.children.length) {
-      loadPanelsList();
-    }
   }
 }
 
@@ -1465,40 +1461,6 @@ el.formTypeToPc?.addEventListener("submit", async (e) => {
   }
 });
 
-// Load Desktop Panels List
-async function loadPanelsList() {
-  try {
-    const data = await api("/api/panels");
-    if (!data.ok || !data.panels) return;
-
-    el.panelsList.innerHTML = "";
-    data.panels.forEach(p => {
-      const btn = document.createElement("button");
-      btn.className = "panel-item-btn";
-      btn.innerHTML = `
-        <span class="panel-item-icon">${p.icon || "󰍜"}</span>
-        <div class="panel-item-content">
-          <span class="panel-item-name">${escapeHtml(p.name)}</span>
-          <span class="panel-item-desc">${escapeHtml(p.description || "Bar panel")}</span>
-        </div>
-      `;
-
-      btn.addEventListener("click", async () => {
-        haptic(20);
-        showToast(`Toggling ${p.name} on PC...`);
-        try {
-          await api("/api/panels/toggle", { method: "POST", body: JSON.stringify({ panelId: p.id }) });
-        } catch (err) {
-          showToast(err.message);
-        }
-      });
-
-      el.panelsList.appendChild(btn);
-    });
-  } catch (err) {
-    el.panelsList.innerHTML = `<div style="color:var(--text-muted);font-size:12px;padding:12px;">Could not load panels.</div>`;
-  }
-}
 
 // Controls Tab: Audio, Media, Tools, Power
 let isUserDraggingVolume = false;
