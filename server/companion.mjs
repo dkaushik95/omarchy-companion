@@ -1071,6 +1071,105 @@ async function togglePanel(panelId) {
   });
 }
 
+async function getControlsState() {
+  let volume = 50;
+  let muted = false;
+  try {
+    const volRes = await run("wpctl", ["get-volume", "@DEFAULT_AUDIO_SINK@"]);
+    const match = volRes.stdout.match(/Volume:\s+([0-9.]+)/i);
+    if (match) volume = Math.round(parseFloat(match[1]) * 100);
+    muted = volRes.stdout.includes("[MUTED]");
+  } catch {}
+
+  let nightlight = false;
+  try {
+    const nlRes = await run("/usr/share/omarchy/bin/omarchy-toggle-nightlight", ["--status"]);
+    const parsed = JSON.parse(nlRes.stdout);
+    nightlight = Boolean(parsed.enabled);
+  } catch {}
+
+  return { volume, muted, nightlight };
+}
+
+async function executeControlAction(action, payload = {}) {
+  const cleanAction = cleanText(action, 50);
+  switch (cleanAction) {
+    case "volume-set": {
+      const vol = Math.max(0, Math.min(150, Number(payload.volume ?? payload.value ?? 0)));
+      await run("wpctl", ["set-volume", "@DEFAULT_AUDIO_SINK@", `${(vol / 100).toFixed(2)}`]);
+      return { ok: true, volume: vol };
+    }
+    case "volume-step": {
+      const step = Number(payload.step || 5);
+      const sign = step >= 0 ? "+" : "-";
+      await run("wpctl", ["set-volume", "@DEFAULT_AUDIO_SINK@", `${Math.abs(step)}%${sign}`]);
+      return { ok: true };
+    }
+    case "toggle-mute": {
+      await run("wpctl", ["set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"]);
+      return { ok: true };
+    }
+    case "media-play-pause": {
+      await run("wtype", ["-k", "XF86AudioPlay"]);
+      return { ok: true };
+    }
+    case "media-next": {
+      await run("wtype", ["-k", "XF86AudioNext"]);
+      return { ok: true };
+    }
+    case "media-prev": {
+      await run("wtype", ["-k", "XF86AudioPrev"]);
+      return { ok: true };
+    }
+    case "media-stop": {
+      await run("wtype", ["-k", "XF86AudioStop"]);
+      return { ok: true };
+    }
+    case "toggle-nightlight": {
+      await run("/usr/share/omarchy/bin/omarchy-toggle-nightlight", []);
+      return { ok: true };
+    }
+    case "toggle-notifications": {
+      await run("/usr/share/omarchy/bin/omarchy-toggle-notification-silencing", []);
+      return { ok: true };
+    }
+    case "toggle-dpms": {
+      await run("hyprctl", ["dispatch", "dpms", "toggle"], 5000, { env: await hyprEnvironment() });
+      return { ok: true };
+    }
+    case "dpms-off": {
+      await run("hyprctl", ["dispatch", "dpms", "off"], 5000, { env: await hyprEnvironment() });
+      return { ok: true };
+    }
+    case "dpms-on": {
+      await run("hyprctl", ["dispatch", "dpms", "on"], 5000, { env: await hyprEnvironment() });
+      return { ok: true };
+    }
+    case "screenshot": {
+      const res = await run("/usr/share/omarchy/bin/omarchy-capture-screenshot", ["fullscreen", "save"]);
+      return { ok: true, output: res.stdout.trim() };
+    }
+    case "lock": {
+      await run("/usr/share/omarchy/bin/omarchy-system-lock", []);
+      return { ok: true };
+    }
+    case "suspend": {
+      await run("systemctl", ["suspend"]);
+      return { ok: true };
+    }
+    case "reboot": {
+      await run("systemctl", ["reboot"]);
+      return { ok: true };
+    }
+    case "poweroff": {
+      await run("systemctl", ["poweroff"]);
+      return { ok: true };
+    }
+    default:
+      throw new Error(`Unknown control action: ${cleanAction}`);
+  }
+}
+
 function getActiveIconThemes() {
   const themes = [];
   const themeFile = join(homedir(), ".local/state/omarchy/current/theme/icons.theme");
@@ -1304,6 +1403,19 @@ async function handleApi(req, res, url) {
     return json(res, 200, { ok: true, result });
   }
 
+  // Desktop Controls (Volume, Media, Power, Display)
+  if (url.pathname === "/api/controls" && req.method === "GET") {
+    const state = await getControlsState();
+    return json(res, 200, { ok: true, ...state });
+  }
+
+  if (url.pathname === "/api/controls" && req.method === "POST") {
+    const input = await body(req);
+    const result = await executeControlAction(input.action, input);
+    const state = await getControlsState();
+    return json(res, 200, { ok: true, result, ...state });
+  }
+
   // Icon resolver
   if (url.pathname === "/api/icon" && (req.method === "GET" || req.method === "HEAD")) {
     const target = url.searchParams.get("name") || url.searchParams.get("class") || "";
@@ -1459,6 +1571,14 @@ async function printPanelStatus() {
     isRunning = false;
   }
 
+  let autostart = false;
+  try {
+    const check = await run("systemctl", ["--user", "is-enabled", "omarchy-companion.service"]);
+    autostart = check.stdout.trim() === "enabled";
+  } catch {
+    autostart = false;
+  }
+
   const net = await getNetworkInfo();
 
   // If running, query server for live client count
@@ -1472,6 +1592,21 @@ async function printPanelStatus() {
     } catch { /* fallback to 0 */ }
   }
 
+  const runtime = process.env.XDG_RUNTIME_DIR || `/run/user/${process.getuid()}`;
+  const qrPath = join(runtime, "omarchy-companion-qr.png");
+  const urlToEncode = net.primaryUrl || net.tailscaleUrl || net.localUrl || `http://127.0.0.1:${port}`;
+  if (urlToEncode) {
+    try {
+      await run("qrencode", ["-s", "6", "-m", "2", "-o", qrPath, urlToEncode]);
+    } catch {}
+  }
+
+  let recentLogs = "";
+  try {
+    const logsRes = await run("journalctl", ["--user", "-u", "omarchy-companion.service", "-n", "8", "--no-pager", "--output=cat"]);
+    recentLogs = logsRes.stdout.trim();
+  } catch {}
+
   const output = {
     running: isRunning,
     clientCount,
@@ -1481,7 +1616,10 @@ async function printPanelStatus() {
     localIp: net.localIp,
     localUrl: net.localUrl,
     primaryUrl: net.primaryUrl,
-    port
+    port,
+    autostart,
+    qrPath,
+    recentLogs
   };
 
   console.log(JSON.stringify(output));
@@ -1503,9 +1641,29 @@ async function main() {
     await run("systemctl", ["--user", "start", "omarchy-companion.service"]);
     return printPanelStatus();
   }
+  if (command === "autostart-toggle") {
+    let isEnabled = false;
+    try {
+      const check = await run("systemctl", ["--user", "is-enabled", "omarchy-companion.service"]);
+      isEnabled = check.stdout.trim() === "enabled";
+    } catch {}
+    if (isEnabled) {
+      await run("systemctl", ["--user", "disable", "omarchy-companion.service"]);
+    } else {
+      await run("systemctl", ["--user", "enable", "omarchy-companion.service"]);
+    }
+    return printPanelStatus();
+  }
+  if (command === "copy-url") {
+    const targetUrl = process.argv[3] || "";
+    if (targetUrl) {
+      await run("wl-copy", [targetUrl]);
+    }
+    return;
+  }
   if (command === "status") return printPanelStatus();
 
-  console.log("Usage: companion.mjs <serve|panel-status|restart|stop|start|status>");
+  console.log("Usage: companion.mjs <serve|panel-status|restart|stop|start|autostart-toggle|copy-url|status>");
   process.exitCode = 1;
 }
 

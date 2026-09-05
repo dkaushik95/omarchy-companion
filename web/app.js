@@ -81,6 +81,13 @@ const el = {
   btnQuickTypeSend: document.getElementById("btn-quick-type-send"),
   panelsList: document.getElementById("panels-list"),
   toggleBtns: document.querySelectorAll(".toggle-btn[data-action]"),
+  volumeBadge: document.getElementById("volume-badge"),
+  btnVolMute: document.getElementById("btn-vol-mute"),
+  volMuteIcon: document.getElementById("vol-mute-icon"),
+  volSlider: document.getElementById("vol-slider"),
+  quickVolBtns: document.querySelectorAll(".quick-vol-btn"),
+  mediaBtns: document.querySelectorAll(".media-btn[data-media-action]"),
+  powerBtns: document.querySelectorAll(".power-btn[data-power-action]"),
   toastContainer: document.getElementById("toast-container")
 };
 
@@ -838,8 +845,11 @@ function switchTab(tabName) {
     renderCanvas();
   }
 
-  if (tabName === "controls" && !el.panelsList.children.length) {
-    loadPanelsList();
+  if (tabName === "controls") {
+    loadControlsState();
+    if (!el.panelsList.children.length) {
+      loadPanelsList();
+    }
   }
 }
 
@@ -1490,17 +1500,111 @@ async function loadPanelsList() {
   }
 }
 
-// Quick PC Toggles
-el.toggleBtns.forEach(btn => {
+// Controls Tab: Audio, Media, Tools, Power
+let isUserDraggingVolume = false;
+let volDebounceTimer = null;
+
+async function loadControlsState() {
+  try {
+    const data = await api("/api/controls");
+    if (!data.ok) return;
+    if (el.volumeBadge && data.volume !== undefined) el.volumeBadge.textContent = `${data.volume}%`;
+    if (el.volSlider && !isUserDraggingVolume && data.volume !== undefined) el.volSlider.value = data.volume;
+    if (el.btnVolMute && data.muted !== undefined) {
+      el.btnVolMute.classList.toggle("muted", data.muted);
+      if (el.volMuteIcon) el.volMuteIcon.textContent = data.muted ? "󰝟" : "󰕾";
+    }
+  } catch {}
+}
+
+async function sendControlAction(action, payload = {}) {
+  haptic(20);
+  try {
+    const res = await api("/api/controls", {
+      method: "POST",
+      body: JSON.stringify({ action, ...payload })
+    });
+    if (res && res.ok) {
+      if (res.volume !== undefined && el.volumeBadge) el.volumeBadge.textContent = `${res.volume}%`;
+      if (res.volume !== undefined && el.volSlider && !isUserDraggingVolume) el.volSlider.value = res.volume;
+      if (res.muted !== undefined && el.btnVolMute) {
+        el.btnVolMute.classList.toggle("muted", res.muted);
+        if (el.volMuteIcon) el.volMuteIcon.textContent = res.muted ? "󰝟" : "󰕾";
+      }
+    }
+    return res;
+  } catch (err) {
+    showToast(err.message || "Action failed");
+  }
+}
+
+// Volume Controls
+if (el.volSlider) {
+  el.volSlider.addEventListener("input", () => {
+    isUserDraggingVolume = true;
+    if (el.volumeBadge) el.volumeBadge.textContent = `${el.volSlider.value}%`;
+    clearTimeout(volDebounceTimer);
+    volDebounceTimer = setTimeout(() => {
+      sendControlAction("volume-set", { volume: Number(el.volSlider.value) });
+    }, 150);
+  });
+
+  el.volSlider.addEventListener("change", () => {
+    isUserDraggingVolume = false;
+    sendControlAction("volume-set", { volume: Number(el.volSlider.value) });
+  });
+}
+
+if (el.btnVolMute) {
+  el.btnVolMute.addEventListener("click", () => {
+    sendControlAction("toggle-mute");
+  });
+}
+
+el.quickVolBtns?.forEach(btn => {
+  btn.addEventListener("click", () => {
+    if (btn.dataset.volStep) {
+      sendControlAction("volume-step", { step: Number(btn.dataset.volStep) });
+    } else if (btn.dataset.volSet) {
+      sendControlAction("volume-set", { volume: Number(btn.dataset.volSet) });
+    }
+  });
+});
+
+// Media Controls
+el.mediaBtns?.forEach(btn => {
+  btn.addEventListener("click", async () => {
+    const action = btn.dataset.mediaAction;
+    await sendControlAction(action);
+    const label = btn.querySelector(".media-label")?.textContent || "Media";
+    showToast(`${label} sent to PC`);
+  });
+});
+
+// Quick Tools Toggles
+el.toggleBtns?.forEach(btn => {
   btn.addEventListener("click", async () => {
     const action = btn.dataset.action;
-    haptic(20);
-    try {
-      await api("/api/menu/launch", { method: "POST", body: JSON.stringify({ action }) });
-      showToast(`Toggled ${btn.querySelector(".toggle-name").textContent}`);
-    } catch (err) {
-      showToast(err.message);
+    await sendControlAction(action);
+    const name = btn.querySelector(".toggle-name")?.textContent || "Action";
+    showToast(`${name} executed`);
+  });
+});
+
+// Power & System Actions
+el.powerBtns?.forEach(btn => {
+  btn.addEventListener("click", async () => {
+    const action = btn.dataset.powerAction;
+    const label = btn.querySelector(".power-label")?.textContent || "Action";
+
+    if (action === "poweroff") {
+      if (!confirm("Are you sure you want to shut down your PC?")) return;
+    } else if (action === "reboot") {
+      if (!confirm("Are you sure you want to reboot your PC?")) return;
     }
+
+    await sendControlAction(action);
+    showToast(`${label} executed on PC`);
   });
 });
 

@@ -30,10 +30,12 @@ Omarchy Companion is a phone companion Progressive Web App (PWA) built specifica
    - **iOS Missing Keys**: Quick buttons for keys not found on mobile keyboards: `Esc`, `Tab`, `Super` (Windows key), `Alt+Tab`, `Ctrl+C`, `Ctrl+V`, `Ctrl+Z`, `Enter`, `Backspace`, and Arrow keys.
    - **Send Text to PC**: Type text on your phone and send it directly to the active cursor on the PC using `wtype`.
 
-5. **Controls Tab (Desktop Panels)**
-   - Displays all Omarchy desktop panels (Audio, Bluetooth, Network, Display, Power, Weather, Clock, System Update, Tailscale, AI Agents, HomeKit, etc.).
-   - Tap any panel card to summon/toggle it directly on your desktop screen via Quickshell IPC.
-   - Quick toggles for Night Light, Touchpad, and Silence Notifications.
+5. **Controls Tab (Real PC Controls & Panels)**
+   - **Audio & Master Volume**: Interactive volume slider with percentage badge, mute toggle (`󰕾`/`󰝟`), and quick step buttons (`-10%`, `-5%`, `25%`, `50%`, `75%`, `+5%`, `+10%`).
+   - **Media Playback**: Control your active media player (Spotify, browser, mpv) with Play/Pause, Next Track, Previous Track, and Stop.
+   - **Display & Quick Tools**: Instant Fullscreen Screenshot, Night Light toggle, Do Not Disturb (silence notifications), and Display Sleep/Wake (`dpms`).
+   - **System & Power**: Lock PC, Sleep/Suspend, Reboot (with confirmation), and Shut Down (with confirmation).
+   - **Desktop Panels Grid**: Direct shortcuts to summon or toggle Omarchy panels on your monitor (Audio, Bluetooth, Network, Display, Power, Weather, Clock, Tailscale, AI Agents, HomeKit, etc.).
 
 ## Installation & Setup
 
@@ -50,21 +52,22 @@ The install script:
 ## Connecting from your Phone
 
 1. Click the phone icon in the right side of the Omarchy top bar.
-2. Note the displayed Tailscale URL (e.g. `http://100.108.19.14:8787`).
+2. Point your phone camera at the on-screen **QR Code** to open the companion immediately, or copy the Tailscale URL.
 3. Open this address in Safari on iOS or Chrome on Android while connected to Tailscale.
 4. Choose **Add to Home Screen** from your browser menu to install the PWA for full-screen use.
 
-## Desktop Panel Features
+## Desktop Top Bar Panel Features
 
-Clicking the phone icon on the Omarchy panel reveals:
-- **Server Status**: Green badge when running, red badge when stopped.
-- **Client Status**: Shows whether a phone is currently connected.
-- **Tailscale URL**: Clickable / quick reference for opening on phone.
-- **Server Controls**:
-  - `Restart Server`
-  - `Close Server` / `Start Server`
-  - `Open Companion in Browser`
-  - `Refresh Status`
+Clicking the phone icon on the Omarchy desktop bar reveals a 3-tab management center:
+- **Connect Tab**:
+  - **Live QR Code**: High-contrast QR code generated via `qrencode` for instant camera pairing.
+  - **One-Click URL Copy**: Dedicated copy buttons for Tailscale and Local LAN URLs with visual feedback (`Copied!`).
+- **Service Tab**:
+  - **Auto-Start on Boot**: Live status badge (`Enabled` / `Disabled`) and click-to-toggle systemd user service enablement.
+  - **Server Controls**: `Restart Server`, `Stop Server` / `Start Server`, and `Open Companion in Browser`.
+  - **Client Diagnostics**: Active connected phone count and real-time status.
+- **Logs Tab**:
+  - Embedded service log viewer displaying recent journalctl events and status refresh.
 
 ## Uninstall
 
