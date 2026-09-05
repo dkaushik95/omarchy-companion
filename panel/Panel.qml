@@ -158,7 +158,7 @@ Panel {
     anchors.fill: parent
     bar: root.bar
     text: root.online ? (root.hasClient ? "󰄜" : "󰀂") : "󰀃"
-    color: root.hasClient ? Color.accent : root.bar.foreground
+    foreground: root.hasClient ? Color.accent : root.bar.foreground
     onPressed: function(button) { root.toggle() }
   }
 

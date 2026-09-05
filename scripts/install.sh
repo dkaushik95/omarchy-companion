@@ -39,6 +39,7 @@ systemctl --user restart omarchy-companion.service
 omarchy plugin validate "$plugin_dir"
 omarchy plugin enable custom.omarchy-companion 2>/dev/null || true
 OMARCHY_PATH=/usr/share/omarchy omarchy-shell shell rescanPlugins 2>/dev/null || true
+/usr/share/omarchy/bin/omarchy-restart-shell 2>/dev/null || true
 
 tailscale_ip=$(tailscale ip -4 2>/dev/null || echo "")
 local_ip=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "127.0.0.1")
