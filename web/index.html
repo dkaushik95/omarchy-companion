@@ -10,7 +10,7 @@
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="apple-touch-icon" href="/api/logo">
     <link rel="icon" type="image/png" href="/api/logo">
-    <link rel="stylesheet" href="/app.css?v=20">
+    <link rel="stylesheet" href="/app.css?v=21">
     <title>Omarchy Companion</title>
   </head>
   <body>
@@ -31,7 +31,10 @@
           <div class="workspaces-section">
             <div class="section-label-row">
               <span class="section-label">WORKSPACES</span>
-              <span class="section-active-badge" id="active-workspace-badge">Workspace 1</span>
+              <div class="workspace-header-actions">
+                <button class="btn-tool-pill" id="btn-toggle-split" title="Toggle Split Orientation">⇄ Toggle Split</button>
+                <span class="section-active-badge" id="active-workspace-badge">Workspace 1</span>
+              </div>
             </div>
             <div class="workspaces-tabs" id="workspaces-tabs" role="tablist">
               <!-- Rendered dynamically: Workspace 1, 2, 3... -->
@@ -42,10 +45,6 @@
           <div class="canvas-section">
             <div class="canvas-container" id="canvas-container">
               <div class="monitor-frame" id="monitor-frame">
-                <div class="monitor-bar-preview">
-                  <span class="monitor-bar-title" id="monitor-focused-title">Desktop</span>
-                  <button class="btn-canvas-add-app" id="btn-canvas-add-app" title="Launch app on this workspace">+ App</button>
-                </div>
                 <div class="monitor-workspace-surface" id="monitor-surface">
                   <!-- Live Drop Preview for Split / Swap -->
                   <div class="canvas-drop-preview" id="canvas-drop-preview">
@@ -308,19 +307,28 @@
               <span class="action-btn-icon">󰍹</span>
               <span class="action-btn-label">Focus Window</span>
             </button>
-            <button class="action-sheet-btn" id="btn-action-tile">
-              <span class="action-btn-icon" id="icon-action-tile">󰹟</span>
-              <span class="action-btn-label" id="label-action-tile">Tile into Workspace</span>
-            </button>
-            <button class="action-sheet-btn" id="btn-action-fullscreen">
-              <span class="action-btn-icon" id="icon-action-fullscreen">󰊓</span>
-              <span class="action-btn-label" id="label-action-fullscreen">Full Screen</span>
-            </button>
+            <div class="sheet-buttons-row">
+              <button class="action-sheet-btn-half" id="btn-action-toggle-split">
+                <span class="action-btn-icon">⇄</span>
+                <span class="action-btn-label">Toggle Split</span>
+              </button>
+              <button class="action-sheet-btn-half" id="btn-action-tile">
+                <span class="action-btn-icon" id="icon-action-tile">󰹟</span>
+                <span class="action-btn-label" id="label-action-tile">Tile / Float</span>
+              </button>
+            </div>
+            <div class="sheet-buttons-row">
+              <button class="action-sheet-btn-half" id="btn-action-fullscreen">
+                <span class="action-btn-icon" id="icon-action-fullscreen">󰊓</span>
+                <span class="action-btn-label" id="label-action-fullscreen">Full Screen</span>
+              </button>
+              <button class="action-sheet-btn-half danger" id="btn-action-close">
+                <span class="action-btn-icon">󰅖</span>
+                <span class="action-btn-label">Close App</span>
+              </button>
+            </div>
+
             <div id="sheet-swaps-list" class="sheet-swaps-container"></div>
-            <button class="action-sheet-btn danger" id="btn-action-close">
-              <span class="action-btn-icon">󰅖</span>
-              <span class="action-btn-label">Close App</span>
-            </button>
           </div>
         </div>
       </div>
@@ -329,6 +337,6 @@
       <div class="toast-container" id="toast-container"></div>
     </div>
 
-    <script type="module" src="/app.js?v=26"></script>
+    <script type="module" src="/app.js?v=27"></script>
   </body>
 </html>

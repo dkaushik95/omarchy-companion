@@ -101,10 +101,102 @@ function fail(res, status, message) {
   json(res, status, { ok: false, error: message });
 }
 
+let cachedSessionEnv = null;
+let lastSessionEnvCheck = 0;
+let sessionEnvPromise = null;
+
+async function fetchSessionEnvironment() {
+  const env = { ...process.env };
+
+  try {
+    const res = await new Promise((done) => {
+      let out = "";
+      const c = spawn("systemctl", ["--user", "show-environment"], { shell: false, env: process.env });
+      c.stdout.on("data", (d) => { out += d; });
+      c.on("error", () => done(null));
+      c.on("close", (code) => done(code === 0 ? out : null));
+    });
+
+    if (res) {
+      for (const line of res.split("\n")) {
+        const match = line.match(/^([^=]+)=(.*)$/);
+        if (match) {
+          let val = match[2];
+          if (val.startsWith('"') && val.endsWith('"')) val = val.slice(1, -1);
+          if (val.startsWith("$'") && val.endsWith("'")) val = val.slice(2, -1);
+          env[match[1]] = val;
+        }
+      }
+    }
+  } catch {}
+
+  const runtime = env.XDG_RUNTIME_DIR || process.env.XDG_RUNTIME_DIR || `/run/user/${process.getuid()}`;
+  env.XDG_RUNTIME_DIR = runtime;
+
+  if (!env.HYPRLAND_INSTANCE_SIGNATURE) {
+    try {
+      const entries = await readdir(join(runtime, "hypr"), { withFileTypes: true });
+      const instance = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort().at(-1);
+      if (instance) env.HYPRLAND_INSTANCE_SIGNATURE = instance;
+    } catch {}
+  }
+
+  if (!env.WAYLAND_DISPLAY) {
+    try {
+      const entries = await readdir(runtime);
+      const waylandSocket = entries.find((e) => /^wayland-\d+$/.test(e));
+      if (waylandSocket) env.WAYLAND_DISPLAY = waylandSocket;
+    } catch {}
+  }
+
+  if (!env.DISPLAY) {
+    env.DISPLAY = ":0";
+  }
+
+  if (!env.XDG_CURRENT_DESKTOP) {
+    env.XDG_CURRENT_DESKTOP = "Hyprland";
+  }
+
+  const home = env.HOME || process.env.HOME || homedir();
+  const currentPath = env.PATH || process.env.PATH || "/usr/local/bin:/usr/bin";
+  const standardPaths = [
+    join(home, ".local", "bin"),
+    "/usr/share/omarchy/bin",
+    join(home, ".local", "share", "mise", "shims"),
+    "/usr/local/bin",
+    "/usr/bin"
+  ];
+  const mergedPath = Array.from(new Set([...standardPaths, ...currentPath.split(":")])).join(":");
+  env.PATH = mergedPath;
+
+  cachedSessionEnv = env;
+  lastSessionEnvCheck = Date.now();
+  return env;
+}
+
+async function getSessionEnvironment() {
+  const nowMs = Date.now();
+  if (cachedSessionEnv && (nowMs - lastSessionEnvCheck < 3000)) {
+    return cachedSessionEnv;
+  }
+  if (!sessionEnvPromise) {
+    sessionEnvPromise = fetchSessionEnvironment().finally(() => {
+      sessionEnvPromise = null;
+    });
+  }
+  return sessionEnvPromise;
+}
+
+async function hyprEnvironment() {
+  return getSessionEnvironment();
+}
+
 async function run(command, args = [], timeout = 15000, options = {}) {
+  const sessionEnv = options.noSessionEnv ? {} : await getSessionEnvironment();
+  const env = { ...process.env, ...sessionEnv, ...(options.env || {}) };
   return new Promise((done) => {
     let stdout = "", stderr = "", killed = false;
-    const child = spawn(command, args.map(String), { shell: false, env: { ...process.env, ...(options.env || {}) } });
+    const child = spawn(command, args.map(String), { shell: false, env });
     if (options.input !== undefined) child.stdin.end(String(options.input));
     const timer = setTimeout(() => { killed = true; child.kill("SIGTERM"); }, timeout);
     child.stdout.on("data", (chunk) => { stdout = (stdout + chunk).slice(-16000); });
@@ -173,18 +265,8 @@ function activeClientCount() {
   return sseCount > 0 ? sseCount : (isRecent ? 1 : 0);
 }
 
-async function hyprEnvironment() {
-  if (process.env.HYPRLAND_INSTANCE_SIGNATURE) return {};
-  const runtime = process.env.XDG_RUNTIME_DIR || `/run/user/${process.getuid()}`;
-  try {
-    const entries = await readdir(join(runtime, "hypr"), { withFileTypes: true });
-    const instance = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort().at(-1);
-    return instance ? { HYPRLAND_INSTANCE_SIGNATURE: instance, XDG_RUNTIME_DIR: runtime } : {};
-  } catch { return {}; }
-}
-
 async function hypr(args, timeout = 15000) {
-  return run("hyprctl", args, timeout, { env: await hyprEnvironment() });
+  return run("hyprctl", args, timeout);
 }
 
 async function hyprJson(args) {
@@ -198,8 +280,27 @@ async function hyprJson(args) {
 
 const luaStr = (value) => '"' + String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"';
 
+function luaFindWindow(addressExpr, windowVar) {
+  return `
+local ${windowVar} = nil
+for _, __w in ipairs(hl.get_windows()) do
+  if __w.address == ${addressExpr} then
+    ${windowVar} = __w
+    break
+  end
+end
+if not ${windowVar} then
+  error("Window with address " .. tostring(${addressExpr}) .. " not found.")
+end
+`;
+}
+
 async function hyprDispatch(lua, timeout = 15000) {
-  return run("hyprctl", ["eval", lua], timeout, { env: await hyprEnvironment() });
+  const res = await run("hyprctl", ["eval", lua], timeout);
+  if (!res.ok || (res.stderr && res.stderr.includes("error:"))) {
+    throw new Error(res.stderr || "Hyprland dispatch error");
+  }
+  return res;
 }
 
 function validAddress(value) {
@@ -311,6 +412,7 @@ function watchThemeChanges() {
     watch(stateThemeDir, { recursive: true }, () => {
       cachedTheme = null;
       lastThemeCheck = 0;
+      forceBroadcast = true;
       broadcastDesktopState();
     });
   } catch {}
@@ -376,14 +478,64 @@ async function desktopState() {
   };
 }
 
-function broadcastDesktopState() {
+let broadcastInFlight = false;
+let broadcastPendingUpdate = false;
+let lastBroadcastSig = "";
+let forceBroadcast = false;
+
+function desktopSignature(monitors, clients, activeWinAddress) {
+  return JSON.stringify([
+    (monitors || []).map(m => [
+      m.name, m.x, m.y, m.width, m.height, m.scale, m.focused ? 1 : 0, m.activeWorkspace?.id || 0
+    ]),
+    activeWinAddress || "",
+    (clients || []).map(c => [
+      c.address,
+      c.at,
+      c.size,
+      c.fullscreen ? 1 : 0,
+      c.floating ? 1 : 0,
+      c.hidden ? 1 : 0,
+      c.mapped === false ? 1 : 0,
+      c.workspace?.id || 0,
+      c.pinned ? 1 : 0
+    ])
+  ]);
+}
+
+async function broadcastDesktopState() {
   if (sseClients.size === 0) return;
-  desktopState().then((state) => {
+  if (broadcastInFlight) {
+    broadcastPendingUpdate = true;
+    return;
+  }
+  broadcastInFlight = true;
+  try {
+    // Cheap change check before building the full state, so clients only get
+    // re-rendered when the desktop layout actually changed.
+    const [monitors, clients, activeWin] = await Promise.all([
+      hyprJson(["monitors"]),
+      hyprJson(["clients"]),
+      hyprJson(["activewindow"])
+    ]);
+    const sig = desktopSignature(monitors.value, clients.value, activeWin?.value?.address || "");
+    if (!forceBroadcast && sig === lastBroadcastSig) return;
+    forceBroadcast = false;
+    lastBroadcastSig = sig;
+
+    const state = await desktopState();
     const payload = `data: ${JSON.stringify({ type: "desktop", ...state })}\n\n`;
     for (const client of sseClients) {
       try { client.write(payload); } catch { sseClients.delete(client); }
     }
-  }).catch(() => {});
+  } catch {}
+  finally {
+    broadcastInFlight = false;
+    if (broadcastPendingUpdate) {
+      broadcastPendingUpdate = false;
+      setImmediate(broadcastDesktopState);
+    }
+  }
 }
 
 async function desktopControl(input) {
@@ -399,6 +551,18 @@ async function desktopControl(input) {
     return { ok: true, workspace: id };
   }
 
+  if (kind === "move-to-workspace" || kind === "movetoworkspace") {
+    if (!validAddress(address)) throw new Error("Invalid window reference.");
+    const wsId = Number(input.workspace || input.workspaceId || input.targetWorkspace);
+    if (!Number.isInteger(wsId) || wsId < 1 || wsId > 99) throw new Error("Invalid workspace.");
+    await hyprDispatch(`
+${luaFindWindow(luaStr(address), "winA")}
+hl.dispatch(hl.dsp.window.move({ workspace = ${wsId}, window = winA }))
+`);
+    setTimeout(broadcastDesktopState, 80);
+    return { ok: true, workspace: wsId };
+  }
+
   if (["focus", "close", "fullscreen", "tile", "float", "toggle-floating"].includes(kind) && !validAddress(address)) {
     throw new Error("Invalid window reference.");
   }
@@ -409,8 +573,11 @@ async function desktopControl(input) {
     if (targetWin?.workspace?.id && targetWin.workspace.id !== state.activeWorkspace?.id) {
       await hyprDispatch(`hl.dispatch(hl.dsp.focus({ workspace = ${targetWin.workspace.id} }))`);
     }
-    await hyprDispatch(`hl.dispatch(hl.dsp.focus({ window = ${luaStr("address:" + address)} }))`);
-    await hyprDispatch(`hl.dispatch(hl.dsp.window.bring_to_top())`);
+    await hyprDispatch(`
+${luaFindWindow(luaStr(address), "winA")}
+hl.dispatch(hl.dsp.focus({ window = winA }))
+hl.dispatch(hl.dsp.window.bring_to_top())
+`);
     if (targetWin?.at && targetWin?.size) {
       const cx = Math.round(targetWin.at[0] + targetWin.size[0] / 2);
       const cy = Math.round(targetWin.at[1] + targetWin.size[1] / 2);
@@ -421,134 +588,102 @@ async function desktopControl(input) {
   }
 
   if (kind === "tile") {
-    await hyprDispatch(`hl.dispatch(hl.dsp.focus({ window = ${luaStr("address:" + address)} }))`);
-    await hyprDispatch(`hl.dispatch(hl.dsp.window.float({ action = "unset", window = ${luaStr("address:" + address)} }))`);
+    await hyprDispatch(`
+${luaFindWindow(luaStr(address), "winA")}
+hl.dispatch(hl.dsp.focus({ window = winA }))
+hl.dispatch(hl.dsp.window.float({ action = "unset", window = winA }))
+`);
     setTimeout(broadcastDesktopState, 80);
     return { ok: true };
   }
 
   if (kind === "float" || kind === "toggle-floating") {
-    await hyprDispatch(`hl.dispatch(hl.dsp.focus({ window = ${luaStr("address:" + address)} }))`);
     const action = kind === "float" ? "set" : "toggle";
-    await hyprDispatch(`hl.dispatch(hl.dsp.window.float({ action = "${action}", window = ${luaStr("address:" + address)} }))`);
+    await hyprDispatch(`
+${luaFindWindow(luaStr(address), "winA")}
+hl.dispatch(hl.dsp.focus({ window = winA }))
+hl.dispatch(hl.dsp.window.float({ action = "${action}", window = winA }))
+`);
     setTimeout(broadcastDesktopState, 80);
     return { ok: true };
   }
 
   if (kind === "close") {
-    await hyprDispatch(`hl.dispatch(hl.dsp.window.close({ window = ${luaStr("address:" + address)} }))`);
+    await hyprDispatch(`
+${luaFindWindow(luaStr(address), "winA")}
+hl.dispatch(hl.dsp.window.close({ window = winA }))
+`);
     setTimeout(broadcastDesktopState, 150);
     return { ok: true };
   }
 
+  if (kind === "togglesplit" || kind === "toggle-split") {
+    if (address && validAddress(address)) {
+      await hyprDispatch(`
+${luaFindWindow(luaStr(address), "winA")}
+hl.dispatch(hl.dsp.focus({ window = winA }))
+hl.dispatch(hl.dsp.layout("togglesplit"))
+`);
+    } else {
+      await hyprDispatch(`hl.dispatch(hl.dsp.layout("togglesplit"))`);
+    }
+    setTimeout(broadcastDesktopState, 80);
+    return { ok: true };
+  }
+
   if (kind === "fullscreen") {
-    await hyprDispatch(`hl.dispatch(hl.dsp.focus({ window = ${luaStr("address:" + address)} }))`);
-    const res = await hyprDispatch(`hl.dispatch(hl.dsp.window.fullscreen())`);
+    await hyprDispatch(`
+${luaFindWindow(luaStr(address), "winA")}
+hl.dispatch(hl.dsp.focus({ window = winA }))
+hl.dispatch(hl.dsp.window.fullscreen())
+`);
     setTimeout(broadcastDesktopState, 50);
-    return { ok: res.ok };
+    return { ok: true };
   }
 
   if (kind === "swap") {
     if (!validAddress(address) || !validAddress(targetAddress)) throw new Error("Invalid window addresses for swap.");
-    await hyprDispatch(`hl.dispatch(hl.dsp.focus({ window = ${luaStr("address:" + address)} }))`);
-    const res = await hyprDispatch(`hl.dispatch(hl.dsp.window.swap({ target = ${luaStr("address:" + targetAddress)} }))`);
+    await hyprDispatch(`
+${luaFindWindow(luaStr(address), "winA")}
+${luaFindWindow(luaStr(targetAddress), "winB")}
+hl.dispatch(hl.dsp.window.swap({ window = winA, target = winB }))
+`);
     setTimeout(broadcastDesktopState, 80);
-    return { ok: res.ok };
+    return { ok: true };
   }
 
   if (kind === "split" || kind === "move") {
     if (!validAddress(address)) throw new Error("Invalid window address.");
     const dir = cleanText(input.direction, 5) || "r";
-    const state = await desktopState();
-    const winA = state.clients.find(c => c.address === address);
-    if (!winA) throw new Error("Window not found.");
+    const dirMap = { r: "r", l: "l", u: "u", d: "d", right: "r", left: "l", up: "u", down: "d" };
+    const cleanDir = dirMap[dir] || "r";
 
-    // Always ensure source window is tiled and focused
-    if (winA.floating) {
-      await hyprDispatch(`hl.dispatch(hl.dsp.window.float({ action = "unset", window = ${luaStr("address:" + address)} }))`);
-    }
-    await hyprDispatch(`hl.dispatch(hl.dsp.focus({ window = ${luaStr("address:" + address)} }))`);
-
-    let winB = targetAddress && validAddress(targetAddress) ? state.clients.find(c => c.address === targetAddress) : null;
-
-    if (!winB && state.clients.length > 1) {
-      const sameWs = state.clients.filter(c => c.workspace?.id === winA.workspace?.id && c.address !== winA.address);
-      if (sameWs.length === 1) {
-        winB = sameWs[0];
-      }
-    }
-
-    if (winB && winB.address !== winA.address) {
-      if (winB.floating) {
-        await hyprDispatch(`hl.dispatch(hl.dsp.window.float({ action = "unset", window = ${luaStr("address:" + winB.address)} }))`);
-      }
-
-      // Check current layout orientation between A and B
-      const isHorizontal = Math.abs(winA.at[1] - winB.at[1]) < Math.abs(winA.at[0] - winB.at[0]);
-
-      if (dir === "r") {
-        if (isHorizontal) {
-          if (winA.at[0] < winB.at[0]) {
-            await hyprDispatch(`hl.dispatch(hl.dsp.window.swap({ target = ${luaStr("address:" + winB.address)} }))`);
-          }
-        } else {
-          await hyprDispatch(`hl.dispatch(hl.dsp.layout("togglesplit"))`);
-          const updated = await desktopState();
-          const uA = updated.clients.find(c => c.address === address);
-          const uB = updated.clients.find(c => c.address === winB.address);
-          if (uA && uB && uA.at[0] < uB.at[0]) {
-            await hyprDispatch(`hl.dispatch(hl.dsp.window.swap({ target = ${luaStr("address:" + winB.address)} }))`);
-          }
-        }
-      } else if (dir === "l") {
-        if (isHorizontal) {
-          if (winA.at[0] > winB.at[0]) {
-            await hyprDispatch(`hl.dispatch(hl.dsp.window.swap({ target = ${luaStr("address:" + winB.address)} }))`);
-          }
-        } else {
-          await hyprDispatch(`hl.dispatch(hl.dsp.layout("togglesplit"))`);
-          const updated = await desktopState();
-          const uA = updated.clients.find(c => c.address === address);
-          const uB = updated.clients.find(c => c.address === winB.address);
-          if (uA && uB && uA.at[0] > uB.at[0]) {
-            await hyprDispatch(`hl.dispatch(hl.dsp.window.swap({ target = ${luaStr("address:" + winB.address)} }))`);
-          }
-        }
-      } else if (dir === "d") {
-        if (!isHorizontal) {
-          if (winA.at[1] < winB.at[1]) {
-            await hyprDispatch(`hl.dispatch(hl.dsp.window.swap({ target = ${luaStr("address:" + winB.address)} }))`);
-          }
-        } else {
-          await hyprDispatch(`hl.dispatch(hl.dsp.layout("togglesplit"))`);
-          const updated = await desktopState();
-          const uA = updated.clients.find(c => c.address === address);
-          const uB = updated.clients.find(c => c.address === winB.address);
-          if (uA && uB && uA.at[1] < uB.at[1]) {
-            await hyprDispatch(`hl.dispatch(hl.dsp.window.swap({ target = ${luaStr("address:" + winB.address)} }))`);
-          }
-        }
-      } else if (dir === "u") {
-        if (!isHorizontal) {
-          if (winA.at[1] > winB.at[1]) {
-            await hyprDispatch(`hl.dispatch(hl.dsp.window.swap({ target = ${luaStr("address:" + winB.address)} }))`);
-          }
-        } else {
-          await hyprDispatch(`hl.dispatch(hl.dsp.layout("togglesplit"))`);
-          const updated = await desktopState();
-          const uA = updated.clients.find(c => c.address === address);
-          const uB = updated.clients.find(c => c.address === winB.address);
-          if (uA && uB && uA.at[1] > uB.at[1]) {
-            await hyprDispatch(`hl.dispatch(hl.dsp.window.swap({ target = ${luaStr("address:" + winB.address)} }))`);
-          }
-        }
-      }
+    if (targetAddress && validAddress(targetAddress) && targetAddress !== address) {
+      // Directed split relative to target window
+      await hyprDispatch(`
+${luaFindWindow(luaStr(address), "winA")}
+${luaFindWindow(luaStr(targetAddress), "winB")}
+if winA.floating then hl.dispatch(hl.dsp.window.float({ action = "unset", window = winA })) end
+if winB.floating then hl.dispatch(hl.dsp.window.float({ action = "unset", window = winB })) end
+hl.dispatch(hl.dsp.focus({ window = winA }))
+hl.dispatch(hl.dsp.window.move({ direction = "${cleanDir}" }))
+local isHoriz = math.abs(winA.at.y - winB.at.y) < math.abs(winA.at.x - winB.at.x)
+if ("${cleanDir}" == "r" or "${cleanDir}" == "l") and not isHoriz then
+  hl.dispatch(hl.dsp.layout("togglesplit"))
+elseif ("${cleanDir}" == "u" or "${cleanDir}" == "d") and isHoriz then
+  hl.dispatch(hl.dsp.layout("togglesplit"))
+end
+`);
     } else {
-      await hyprDispatch(`hl.dispatch(hl.dsp.window.move({ direction = ${luaStr(dir)} }))`);
+      await hyprDispatch(`
+${luaFindWindow(luaStr(address), "winA")}
+if winA.floating then hl.dispatch(hl.dsp.window.float({ action = "unset", window = winA })) end
+hl.dispatch(hl.dsp.focus({ window = winA }))
+hl.dispatch(hl.dsp.window.move({ direction = "${cleanDir}" }))
+`);
     }
 
     setTimeout(broadcastDesktopState, 80);
-    setTimeout(broadcastDesktopState, 250);
     return { ok: true };
   }
 
@@ -558,13 +693,18 @@ async function desktopControl(input) {
     const state = await desktopState();
     const target = state.monitors.find((m) => m.activeWorkspace?.id === workspace) || state.monitors[0];
     if (!target) throw new Error("No monitor available.");
+    const monScale = target.scale || 1.6;
+    const monLogicalW = target.width / monScale;
+    const monLogicalH = target.height / monScale;
     const relativeX = Math.max(0, Math.min(1, Number(input.x) || 0));
     const relativeY = Math.max(0, Math.min(1, Number(input.y) || 0));
-    const win = luaStr("address:" + address);
-    const finalX = Math.round(target.x + relativeX * target.width);
-    const finalY = Math.round(target.y + relativeY * target.height);
-    await hyprDispatch(`hl.dispatch(hl.dsp.window.float({ action = "set", window = ${win} }))`);
-    await hyprDispatch(`hl.dispatch(hl.dsp.window.move({ x = ${finalX}, y = ${finalY}, relative = false, window = ${win} }))`);
+    const finalX = Math.round(target.x + relativeX * monLogicalW);
+    const finalY = Math.round(target.y + relativeY * monLogicalH);
+    await hyprDispatch(`
+${luaFindWindow(luaStr(address), "winA")}
+hl.dispatch(hl.dsp.window.float({ action = "set", window = winA }))
+hl.dispatch(hl.dsp.window.move({ x = ${finalX}, y = ${finalY}, relative = false, window = winA }))
+`);
     setTimeout(broadcastDesktopState, 100);
     return { ok: true };
   }
@@ -832,18 +972,28 @@ async function getMenuStructure() {
 }
 
 async function launchDetached(command, args = [], options = {}) {
-  const env = { ...process.env, ...(await hyprEnvironment()), ...(options.env || {}) };
-  try {
-    const child = spawn(command, args, { detached: true, stdio: "ignore", env });
-    child.on("error", (err) => {
-      console.error(`[launchDetached] Error launching ${command}:`, err.message);
-    });
-    child.unref();
-    return { ok: true, message: `Launched ${command}` };
-  } catch (err) {
-    console.error(`[launchDetached] Failed to spawn ${command}:`, err.message);
-    throw err;
-  }
+  const sessionEnv = options.noSessionEnv ? {} : await getSessionEnvironment();
+  const env = { ...process.env, ...sessionEnv, ...(options.env || {}) };
+  return new Promise((resolve, reject) => {
+    try {
+      const child = spawn(command, args, { detached: true, stdio: "ignore", env });
+      let hasError = false;
+      child.on("error", (err) => {
+        hasError = true;
+        console.error(`[launchDetached] Error launching ${command}:`, err.message);
+        reject(err);
+      });
+      setTimeout(() => {
+        if (!hasError) {
+          try { child.unref(); } catch {}
+          resolve({ ok: true, message: `Launched ${command}` });
+        }
+      }, 60);
+    } catch (err) {
+      console.error(`[launchDetached] Failed to spawn ${command}:`, err.message);
+      reject(err);
+    }
+  });
 }
 
 async function executeMenuAction(actionId, params = {}) {
@@ -888,10 +1038,11 @@ async function executeMenuAction(actionId, params = {}) {
     }
 
     if (!app) {
+      const cleanExec = targetId.replace(/\.desktop$/i, "");
       app = {
         id: targetId,
-        name: params.name || targetId,
-        exec: targetId,
+        name: params.name || cleanExec,
+        exec: cleanExec,
         terminal: false
       };
     }
@@ -962,17 +1113,17 @@ async function executeMenuAction(actionId, params = {}) {
   switch (actionId) {
     case "shutdown":
     case "system.shutdown":
-      run("omarchy-system-shutdown", []).catch(() => run("systemctl", ["poweroff"]));
+      run("omarchy", ["system", "shutdown"]).catch(() => run("systemctl", ["poweroff"]));
       return { ok: true, message: "Shutting down..." };
 
     case "reboot":
     case "system.reboot":
-      run("omarchy-system-reboot", []).catch(() => run("systemctl", ["reboot"]));
+      run("omarchy", ["system", "reboot"]).catch(() => run("systemctl", ["reboot"]));
       return { ok: true, message: "Rebooting..." };
 
     case "suspend":
     case "system.suspend":
-      run("systemctl", ["suspend"]);
+      run("omarchy", ["system", "suspend"]).catch(() => run("systemctl", ["suspend"]));
       return { ok: true, message: "Suspending..." };
 
     case "lock":
@@ -982,16 +1133,16 @@ async function executeMenuAction(actionId, params = {}) {
 
     case "logout":
     case "system.logout":
-      run("omarchy-system-logout", []);
+      run("omarchy", ["system", "logout"]);
       return { ok: true, message: "Logging out..." };
 
     case "screensaver":
     case "system.screensaver":
-      run("omarchy-launch-screensaver", ["force"]);
+      run("omarchy", ["launch", "screensaver"]).catch(() => run("omarchy-launch-screensaver", ["force"]));
       return { ok: true, message: "Screensaver started" };
 
     case "about":
-      launchDetached("omarchy-launch-about");
+      launchDetached("omarchy", ["launch", "about"]).catch(() => launchDetached("omarchy-launch-about"));
       return { ok: true, message: "Opened About" };
 
     default:
@@ -1015,38 +1166,34 @@ async function getPanelsList() {
     "omarchy.clock": { name: "Clock & Calendar", icon: "", desc: "Time and calendar popover" },
     "omarchy.indicators": { name: "Indicators", icon: "󱅫", desc: "Status indicators" },
     "omarchy.weather": { name: "Weather", icon: "󰖐", desc: "Live weather forecast" },
-    "omarchy.system-update": { name: "System Update", icon: "", desc: "Package update status" },
-    "omarchy.audio": { name: "Audio", icon: "", desc: "Volume and audio devices" },
-    "omarchy.bluetooth": { name: "Bluetooth", icon: "󰂯", desc: "Bluetooth devices and power" },
-    "omarchy.network": { name: "Network & Wi-Fi", icon: "󰖩", desc: "Wi-Fi and internet status" },
-    "omarchy.monitor": { name: "Display", icon: "󰍹", desc: "Monitors and display scaling" },
-    "omarchy.power": { name: "Power", icon: "", desc: "Power and lock menu" },
-    "omarchy.tailscale": { name: "Tailscale", icon: "󰒢", desc: "Tailscale VPN status" },
+    "omarchy.media": { name: "Media Player", icon: "󰝚", desc: "MPRIS media controls" },
+    "omarchy.audio": { name: "Audio", icon: "󰕾", desc: "Volume & device switcher" },
+    "omarchy.bluetooth": { name: "Bluetooth", icon: "󰂯", desc: "Bluetooth devices" },
+    "omarchy.network": { name: "Network", icon: "󰤨", desc: "Wi-Fi & Ethernet settings" },
+    "omarchy.battery": { name: "Battery & Power", icon: "󰁹", desc: "Power profiles & battery" },
+    "omarchy.notifications": { name: "Notifications", icon: "󰂚", desc: "Notification center" },
     "omarchy.agents": { name: "AI Agents", icon: "󰚩", desc: "AI assistant launchers" },
-    "custom.homekit": { name: "HomeKit Lights", icon: "󱅔", desc: "Smart home lights" },
-    "custom.opencode-mobile": { name: "OpenCode Mobile", icon: "", desc: "OpenCode connection" },
-    "custom.omarchy-companion": { name: "Omarchy Companion", icon: "", desc: "Phone companion server" },
-    "omarchy.tray": { name: "System Tray", icon: "󱊖", desc: "Tray icons" }
+    "omarchy.system": { name: "System Controls", icon: "󰐥", desc: "Lock, sleep, shutdown" }
   };
 
-  const layout = barConfig?.bar?.layout || {};
-  for (const section of ["left", "center", "right"]) {
-    const items = Array.isArray(layout[section]) ? layout[section] : [];
-    for (const item of items) {
-      if (!item?.id) continue;
-      const meta = knownTitles[item.id] || { name: item.id.replace(/^omarchy\./, "").replace(/^custom\./, ""), icon: "󰍜", desc: "Bar widget" };
-      panelsMap.set(item.id, {
-        id: item.id,
-        name: meta.name,
-        icon: meta.icon,
-        description: meta.desc,
-        section,
-        enabled: true
-      });
+  const sections = ["start", "center", "end"];
+  for (const sec of sections) {
+    const list = barConfig[sec] || [];
+    for (const item of list) {
+      if (typeof item === "string") {
+        const meta = knownTitles[item] || { name: item, icon: "󱂬", desc: "" };
+        panelsMap.set(item, {
+          id: item,
+          name: meta.name,
+          icon: meta.icon,
+          description: meta.desc,
+          section: sec,
+          enabled: true
+        });
+      }
     }
   }
 
-  // Ensure essential panels exist
   for (const [id, meta] of Object.entries(knownTitles)) {
     if (!panelsMap.has(id)) {
       panelsMap.set(id, {
@@ -1083,9 +1230,11 @@ async function getControlsState() {
 
   let nightlight = false;
   try {
-    const nlRes = await run("/usr/share/omarchy/bin/omarchy-toggle-nightlight", ["--status"]);
-    const parsed = JSON.parse(nlRes.stdout);
-    nightlight = Boolean(parsed.enabled);
+    const nlRes = await run("omarchy", ["toggle", "nightlight", "--status"]);
+    if (nlRes.ok) {
+      const parsed = JSON.parse(nlRes.stdout);
+      nightlight = Boolean(parsed.enabled);
+    }
   } catch {}
 
   return { volume, muted, nightlight };
@@ -1102,11 +1251,15 @@ async function executeControlAction(action, payload = {}) {
     case "volume-step": {
       const step = Number(payload.step || 5);
       const sign = step >= 0 ? "+" : "-";
-      await run("wpctl", ["set-volume", "@DEFAULT_AUDIO_SINK@", `${Math.abs(step)}%${sign}`]);
+      await run("omarchy", ["audio", "output", "volume", `${sign}${Math.abs(step)}%`]).catch(() => {
+        return run("wpctl", ["set-volume", "@DEFAULT_AUDIO_SINK@", `${Math.abs(step)}%${sign}`]);
+      });
       return { ok: true };
     }
     case "toggle-mute": {
-      await run("wpctl", ["set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"]);
+      await run("omarchy", ["audio", "output", "volume", "mute-toggle"]).catch(() => {
+        return run("wpctl", ["set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"]);
+      });
       return { ok: true };
     }
     case "media-play-pause": {
@@ -1126,39 +1279,39 @@ async function executeControlAction(action, payload = {}) {
       return { ok: true };
     }
     case "toggle-nightlight": {
-      await run("/usr/share/omarchy/bin/omarchy-toggle-nightlight", []);
+      await run("omarchy", ["toggle", "nightlight"]);
       return { ok: true };
     }
     case "toggle-notifications": {
-      await run("/usr/share/omarchy/bin/omarchy-toggle-notification-silencing", []);
+      await run("omarchy", ["toggle", "notification", "silencing"]);
       return { ok: true };
     }
     case "toggle-dpms": {
-      await run("hyprctl", ["dispatch", "dpms", "toggle"], 5000, { env: await hyprEnvironment() });
+      await run("hyprctl", ["dispatch", "dpms", "toggle"]);
       return { ok: true };
     }
     case "dpms-off": {
-      await run("hyprctl", ["dispatch", "dpms", "off"], 5000, { env: await hyprEnvironment() });
+      await run("hyprctl", ["dispatch", "dpms", "off"]);
       return { ok: true };
     }
     case "dpms-on": {
-      await run("hyprctl", ["dispatch", "dpms", "on"], 5000, { env: await hyprEnvironment() });
+      await run("hyprctl", ["dispatch", "dpms", "on"]);
       return { ok: true };
     }
     case "screenshot": {
-      const res = await run("/usr/share/omarchy/bin/omarchy-capture-screenshot", ["fullscreen", "save"]);
+      const res = await run("omarchy", ["capture", "screenshot", "fullscreen", "save"]);
       return { ok: true, output: res.stdout.trim() };
     }
     case "lock": {
-      await run("/usr/share/omarchy/bin/omarchy-system-lock", []);
+      await run("omarchy", ["system", "lock"]);
       return { ok: true };
     }
     case "suspend": {
-      await run("systemctl", ["suspend"]);
+      await run("omarchy", ["system", "suspend"]).catch(() => run("systemctl", ["suspend"]));
       return { ok: true };
     }
     case "reboot": {
-      await run("systemctl", ["reboot"]);
+      await run("omarchy", ["system", "reboot"]).catch(() => run("systemctl", ["reboot"]));
       return { ok: true };
     }
     case "poweroff": {
@@ -1170,17 +1323,17 @@ async function executeControlAction(action, payload = {}) {
   }
 }
 
-function getActiveIconThemes() {
+async function getActiveIconThemes() {
   const themes = [];
   const themeFile = join(homedir(), ".local/state/omarchy/current/theme/icons.theme");
   if (existsSync(themeFile)) {
     try {
-      const cur = readFileSync(themeFile, "utf8").trim();
+      const cur = (await readFile(themeFile, "utf8")).trim();
       if (cur) {
         themes.push(cur);
         const indexTheme = `/usr/share/icons/${cur}/index.theme`;
         if (existsSync(indexTheme)) {
-          const content = readFileSync(indexTheme, "utf8");
+          const content = await readFile(indexTheme, "utf8");
           const match = content.match(/^Inherits=(.*)$/m);
           if (match) {
             for (const inh of match[1].split(",")) {
@@ -1253,7 +1406,7 @@ async function resolveIcon(nameOrClass) {
     return iconLookupCache.get(target);
   }
 
-  const themes = getActiveIconThemes();
+  const themes = await getActiveIconThemes();
 
   // 1. Direct search with target name
   let found = findIconInThemes(target, themes);

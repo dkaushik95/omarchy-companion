@@ -1,4 +1,4 @@
-const cacheName = "omarchy-companion-v26";
+const cacheName = "omarchy-companion-v27";
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();

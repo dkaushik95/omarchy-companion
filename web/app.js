@@ -10,6 +10,7 @@ const state = {
   searchQuery: "",
   selectedWindow: null,
   connected: false,
+  sseActive: false,
   drag: {
     active: false,
     element: null,
@@ -19,7 +20,8 @@ const state = {
     currentX: 0,
     currentY: 0,
     targetAddress: null,
-    dragged: false
+    dragged: false,
+    renderPending: false
   },
   trackpad: {
     lastX: null,
@@ -48,6 +50,8 @@ const el = {
   monitorFocusedTitle: document.getElementById("monitor-focused-title"),
   surfacePlaceholder: document.getElementById("surface-placeholder"),
   btnQuickLaunch: document.getElementById("btn-quick-launch"),
+  btnToggleSplit: document.getElementById("btn-toggle-split"),
+  btnActionToggleSplit: document.getElementById("btn-action-toggle-split"),
   btnCanvasAddApp: document.getElementById("btn-canvas-add-app"),
   navTabs: document.querySelectorAll(".nav-item[data-tab]"),
   tabPanels: document.querySelectorAll(".tab-panel"),
@@ -129,6 +133,7 @@ function connectSSE() {
   const es = new EventSource("/api/events");
 
   es.onopen = () => {
+    state.sseActive = true;
     setConnectionState(true);
   };
 
@@ -143,6 +148,7 @@ function connectSSE() {
 
   es.onerror = () => {
     es.close();
+    state.sseActive = false;
     setConnectionState(false);
     sseRetryTimer = setTimeout(connectSSE, 2500);
   };
@@ -264,15 +270,27 @@ function applyTheme(theme) {
   if (metaTheme) metaTheme.setAttribute("content", bg);
 }
 
+let lastThemeKey = "";
+
 function updateDesktopState(data) {
   state.desktop = data;
   if (data.theme) {
-    applyTheme(data.theme);
+    const key = JSON.stringify(data.theme);
+    if (key !== lastThemeKey) {
+      lastThemeKey = key;
+      applyTheme(data.theme);
+    }
   }
   if (data.activeWorkspace?.id) {
     if (!state.selectedWorkspaceId || !data.workspaces.some(w => w.id === state.selectedWorkspaceId)) {
       state.selectedWorkspaceId = data.activeWorkspace.id;
     }
+  }
+  // Never tear down the canvas mid-drag; that is what makes dragging feel
+  // finicky. Re-render once the pointer is released instead.
+  if (state.drag.active) {
+    state.drag.renderPending = true;
+    return;
   }
   renderWorkspaces();
   renderCanvas();
@@ -300,6 +318,7 @@ function renderWorkspaces() {
   fullList.forEach(ws => {
     const btn = document.createElement("button");
     btn.className = `workspace-tab ${ws.id === currentViewId ? "active" : ""}`;
+    btn.dataset.workspaceId = ws.id;
     btn.setAttribute("role", "tab");
     btn.setAttribute("aria-selected", ws.id === currentViewId ? "true" : "false");
     
@@ -332,9 +351,10 @@ function renderCanvas() {
   const monitor = state.desktop?.monitors?.find(m => m.focused) || state.desktop?.monitors?.[0] || { width: 1920, height: 1080, x: 0, y: 0, scale: 1.6 };
   const clients = (state.desktop?.clients || []).filter(c => c.workspace?.id === wsId && !c.hidden);
 
-  // Update focused window title in monitor bar
-  const focusedClient = clients.find(c => c.address === state.desktop?.clients?.find(cl => cl.focused)?.address) || clients[0];
-  el.monitorFocusedTitle.textContent = focusedClient ? `${focusedClient.title} (${focusedClient.class})` : "Desktop (Empty)";
+  if (el.monitorFocusedTitle) {
+    const focusedClient = clients.find(c => c.address === state.desktop?.clients?.find(cl => cl.focused)?.address) || clients[0];
+    el.monitorFocusedTitle.textContent = focusedClient ? `${focusedClient.title} (${focusedClient.class})` : "Desktop (Empty)";
+  }
 
   // Remove existing window rectangles
   const oldRects = el.monitorSurface.querySelectorAll(".window-rect");
@@ -346,38 +366,46 @@ function renderCanvas() {
   }
   el.surfacePlaceholder.style.display = "none";
 
-  // Calculate bounding box of all visible windows in this workspace so they span flush
-  let minX = Infinity, maxX = -Infinity;
-  let minY = Infinity, maxY = -Infinity;
+  const monScale = monitor.scale || 1.6;
+  const monLogicalW = monitor.width / monScale;
+  const monLogicalH = monitor.height / monScale;
 
-  clients.forEach(c => {
+  const tiledClients = clients.filter(c => !c.floating);
+  let minTiledX = Infinity, maxTiledX = -Infinity;
+  let minTiledY = Infinity, maxTiledY = -Infinity;
+
+  tiledClients.forEach(c => {
     const x1 = c.at[0];
     const y1 = c.at[1];
     const x2 = c.at[0] + c.size[0];
     const y2 = c.at[1] + c.size[1];
-    if (x1 < minX) minX = x1;
-    if (x2 > maxX) maxX = x2;
-    if (y1 < minY) minY = y1;
-    if (y2 > maxY) maxY = y2;
+    if (x1 < minTiledX) minTiledX = x1;
+    if (x2 > maxTiledX) maxTiledX = x2;
+    if (y1 < minTiledY) minTiledY = y1;
+    if (y2 > maxTiledY) maxTiledY = y2;
   });
 
-  const monLogicalW = monitor.width / (monitor.scale || 1.6);
-  const monLogicalH = monitor.height / (monitor.scale || 1.6);
-  const spanX = (maxX > minX && (maxX - minX) > 100) ? (maxX - minX) : monLogicalW;
-  const spanY = (maxY > minY && (maxY - minY) > 100) ? (maxY - minY) : monLogicalH;
+  const spanTiledX = (maxTiledX > minTiledX && (maxTiledX - minTiledX) > 100) ? (maxTiledX - minTiledX) : monLogicalW;
+  const spanTiledY = (maxTiledY > minTiledY && (maxTiledY - minTiledY) > 100) ? (maxTiledY - minTiledY) : monLogicalH;
 
   clients.forEach(c => {
-    // If only 1 client, give it 100% width and height flush
     let leftPct = 0;
     let topPct = 0;
     let widthPct = 100;
     let heightPct = 100;
 
-    if (clients.length > 1) {
-      leftPct = Math.max(0, Math.min(96, ((c.at[0] - minX) / spanX) * 100));
-      topPct = Math.max(0, Math.min(96, ((c.at[1] - minY) / spanY) * 100));
-      widthPct = Math.max(12, Math.min(100 - leftPct, (c.size[0] / spanX) * 100));
-      heightPct = Math.max(12, Math.min(100 - topPct, (c.size[1] / spanY) * 100));
+    if (c.floating) {
+      // Floating windows positioned by exact monitor coordinates
+      leftPct = Math.max(0, Math.min(92, (c.at[0] / monLogicalW) * 100));
+      topPct = Math.max(0, Math.min(92, (c.at[1] / monLogicalH) * 100));
+      widthPct = Math.max(15, Math.min(100 - leftPct, (c.size[0] / monLogicalW) * 100));
+      heightPct = Math.max(15, Math.min(100 - topPct, (c.size[1] / monLogicalH) * 100));
+    } else if (tiledClients.length > 1) {
+      // Tiled windows span flush across tiled layout space
+      leftPct = Math.max(0, Math.min(96, ((c.at[0] - minTiledX) / spanTiledX) * 100));
+      topPct = Math.max(0, Math.min(96, ((c.at[1] - minTiledY) / spanTiledY) * 100));
+      widthPct = Math.max(12, Math.min(100 - leftPct, (c.size[0] / spanTiledX) * 100));
+      heightPct = Math.max(12, Math.min(100 - topPct, (c.size[1] / spanTiledY) * 100));
     }
 
     const rect = document.createElement("div");
@@ -413,12 +441,98 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
-// Find drop target window or surface edge with directional split zones
-function findDropTarget(clientX, clientY, sourceAddress) {
+// Find drop target window, workspace tab, or surface edge
+function findDropTarget(clientX, clientY, sourceAddress, isFloating = false) {
   const surfaceRect = el.monitorSurface.getBoundingClientRect();
+
+  // 1. Workspace strip: the whole header above the canvas snaps to the nearest tab
+  //    (no precision required - just drag up into the strip).
+  const tabsEl = el.workspacesTabs;
+  if (tabsEl && tabsEl.children.length > 1) {
+    const stripRect = tabsEl.parentElement.getBoundingClientRect();
+    if (clientY >= stripRect.top && clientY <= stripRect.bottom &&
+        clientX >= stripRect.left && clientX <= stripRect.right) {
+      let nearest = null;
+      let nearestDist = Infinity;
+      for (const tab of tabsEl.children) {
+        const b = tab.getBoundingClientRect();
+        const dist = Math.abs(b.left + b.width / 2 - clientX);
+        if (dist < nearestDist) {
+          nearestDist = dist;
+          nearest = tab;
+        }
+      }
+      if (nearest && nearestDist < 80) {
+        const wsId = Number(nearest.dataset.workspaceId);
+        const currentWs = state.selectedWorkspaceId || state.desktop?.activeWorkspace?.id || 1;
+        if (wsId && wsId !== currentWs) {
+          return {
+            type: "workspace",
+            workspaceId: wsId,
+            tabEl: nearest,
+            label: `Move to Workspace ${wsId}`,
+            icon: "󰍹"
+          };
+        }
+      }
+    }
+  }
+
+  // If the dragged window is floating, disable all snapping to windows and surface edges
+  if (isFloating) {
+    return null;
+  }
+
+  // 2. Outer corridor of the canvas = move the window to that side of the screen.
+  //    These take precedence so edge-moves stay reachable even when tiled windows
+  //    cover the entire canvas.
+  const relSurfX = (clientX - surfaceRect.left) / surfaceRect.width;
+  const relSurfY = (clientY - surfaceRect.top) / surfaceRect.height;
+  const inSurface = clientX >= surfaceRect.left && clientX <= surfaceRect.right &&
+                    clientY >= surfaceRect.top && clientY <= surfaceRect.bottom;
+  const corridor = 0.09;
+  if (inSurface) {
+    if (relSurfX < corridor) {
+      return {
+        type: "move",
+        direction: "l",
+        preview: { left: 0, top: 0, width: surfaceRect.width / 2, height: surfaceRect.height },
+        label: "Move Left ⇤",
+        icon: "󰁍"
+      };
+    }
+    if (relSurfX > 1 - corridor) {
+      return {
+        type: "move",
+        direction: "r",
+        preview: { left: surfaceRect.width / 2, top: 0, width: surfaceRect.width / 2, height: surfaceRect.height },
+        label: "Move Right ⇥",
+        icon: "󰁔"
+      };
+    }
+    if (relSurfY < corridor) {
+      return {
+        type: "move",
+        direction: "u",
+        preview: { left: 0, top: 0, width: surfaceRect.width, height: surfaceRect.height / 2 },
+        label: "Move Up ⤒",
+        icon: "󰁝"
+      };
+    }
+    if (relSurfY > 1 - corridor) {
+      return {
+        type: "move",
+        direction: "d",
+        preview: { left: 0, top: surfaceRect.height / 2, width: surfaceRect.width, height: surfaceRect.height / 2 },
+        label: "Move Down ⤓",
+        icon: "󰁅"
+      };
+    }
+  }
+
+  // 3. Check if hovering over another window (center = swap, edge = split)
   const rects = el.monitorSurface.querySelectorAll(".window-rect");
 
-  // Check if hovering over another window
   for (const r of rects) {
     if (r.dataset.address === sourceAddress) continue;
     const b = r.getBoundingClientRect();
@@ -432,11 +546,12 @@ function findDropTarget(clientX, clientY, sourceAddress) {
       const dx = relX - 0.5;
       const dy = relY - 0.5;
 
-      // Center 25% dead-zone = SWAP
-      if (Math.abs(dx) < 0.16 && Math.abs(dy) < 0.16) {
+      // Center 40% zone = SWAP
+      if (Math.abs(dx) < 0.22 && Math.abs(dy) < 0.22) {
         return {
           type: "swap",
           targetAddress: r.dataset.address,
+          targetEl: r,
           title,
           preview: { left: bLeft, top: bTop, width: b.width, height: b.height },
           label: `Swap with ${title}`,
@@ -444,13 +559,14 @@ function findDropTarget(clientX, clientY, sourceAddress) {
         };
       }
 
-      // 4 Quadrants: Right, Left, Below, Above
+      // Outer directional quadrants = SPLIT LAYOUT
       if (Math.abs(dx) >= Math.abs(dy)) {
         if (dx > 0) {
           return {
             type: "split",
             direction: "r",
             targetAddress: r.dataset.address,
+            targetEl: r,
             title,
             preview: { left: bLeft + b.width / 2, top: bTop, width: b.width / 2, height: b.height },
             label: `Split Right ›`,
@@ -461,6 +577,7 @@ function findDropTarget(clientX, clientY, sourceAddress) {
             type: "split",
             direction: "l",
             targetAddress: r.dataset.address,
+            targetEl: r,
             title,
             preview: { left: bLeft, top: bTop, width: b.width / 2, height: b.height },
             label: `Split Left ‹`,
@@ -473,6 +590,7 @@ function findDropTarget(clientX, clientY, sourceAddress) {
             type: "split",
             direction: "d",
             targetAddress: r.dataset.address,
+            targetEl: r,
             title,
             preview: { left: bLeft, top: bTop + b.height / 2, width: b.width, height: b.height / 2 },
             label: `Split Below ∨`,
@@ -483,6 +601,7 @@ function findDropTarget(clientX, clientY, sourceAddress) {
             type: "split",
             direction: "u",
             targetAddress: r.dataset.address,
+            targetEl: r,
             title,
             preview: { left: bLeft, top: bTop, width: b.width, height: b.height / 2 },
             label: `Split Above ∧`,
@@ -490,49 +609,6 @@ function findDropTarget(clientX, clientY, sourceAddress) {
           };
         }
       }
-    }
-  }
-
-  // If not hovering over a window, check if near edges of the monitor workspace surface
-  if (clientX >= surfaceRect.left && clientX <= surfaceRect.right &&
-      clientY >= surfaceRect.top && clientY <= surfaceRect.bottom) {
-    const relSurfX = (clientX - surfaceRect.left) / surfaceRect.width;
-    const relSurfY = (clientY - surfaceRect.top) / surfaceRect.height;
-    if (relSurfX < 0.16) {
-      return {
-        type: "move",
-        direction: "l",
-        preview: { left: 0, top: 0, width: surfaceRect.width / 2, height: surfaceRect.height },
-        label: "Move Left Edge",
-        icon: "󰁍"
-      };
-    }
-    if (relSurfX > 0.84) {
-      return {
-        type: "move",
-        direction: "r",
-        preview: { left: surfaceRect.width / 2, top: 0, width: surfaceRect.width / 2, height: surfaceRect.height },
-        label: "Move Right Edge",
-        icon: "󰁔"
-      };
-    }
-    if (relSurfY < 0.16) {
-      return {
-        type: "move",
-        direction: "u",
-        preview: { left: 0, top: 0, width: surfaceRect.width, height: surfaceRect.height / 2 },
-        label: "Move Top Edge",
-        icon: "󰁝"
-      };
-    }
-    if (relSurfY > 0.84) {
-      return {
-        type: "move",
-        direction: "d",
-        preview: { left: 0, top: surfaceRect.height / 2, width: surfaceRect.width, height: surfaceRect.height / 2 },
-        label: "Move Bottom Edge",
-        icon: "󰁅"
-      };
     }
   }
 
@@ -549,8 +625,19 @@ function setupWindowDragAndClick(rect, client) {
   let hasMoved = false;
   let currentDropTarget = null;
   let lastTargetKey = null;
+  let lastHoveredEl = null;
+
+  const clearHoverTargets = () => {
+    if (lastHoveredEl) {
+      lastHoveredEl.classList.remove("drop-target");
+      lastHoveredEl = null;
+    }
+    document.querySelectorAll(".drop-target").forEach((el) => el.classList.remove("drop-target"));
+  };
 
   const onPointerDown = (e) => {
+    if (state.drag.active) return;
+    state.drag.active = true;
     isDragging = true;
     hasMoved = false;
     startX = e.clientX;
@@ -560,8 +647,7 @@ function setupWindowDragAndClick(rect, client) {
     currentDropTarget = null;
     lastTargetKey = null;
     state.drag.sourceAddress = client.address;
-    rect.setPointerCapture(e.pointerId);
-    rect.classList.add("dragging");
+    try { rect.setPointerCapture(e.pointerId); } catch {}
   };
 
   const onPointerMove = (e) => {
@@ -569,23 +655,34 @@ function setupWindowDragAndClick(rect, client) {
     const dx = e.clientX - startX;
     const dy = e.clientY - startY;
 
-    if (!hasMoved && (Math.abs(dx) > 6 || Math.abs(dy) > 6)) {
+    if (!hasMoved && (Math.abs(dx) > 12 || Math.abs(dy) > 12)) {
       hasMoved = true;
-      haptic(15);
+      rect.classList.add("dragging");
+      haptic(25);
     }
 
     if (hasMoved) {
       currentTranslateX = dx;
       currentTranslateY = dy;
-      rect.style.transform = `translate3d(${dx}px, ${dy}px, 0) scale(1.04)`;
+      rect.style.transform = `translate3d(${dx}px, ${dy}px, 0)`;
 
-      const target = findDropTarget(e.clientX, e.clientY, client.address);
+      const target = findDropTarget(e.clientX, e.clientY, client.address, Boolean(client.floating));
       currentDropTarget = target;
 
-      const targetKey = target ? `${target.type}:${target.direction || ""}:${target.targetAddress || ""}` : null;
+      const targetKey = target ? `${target.type}:${target.direction || ""}:${target.workspaceId || target.targetAddress || ""}` : null;
       if (targetKey !== lastTargetKey) {
         lastTargetKey = targetKey;
-        if (target) haptic(10);
+        clearHoverTargets();
+        if (target) {
+          haptic(15);
+          if (target.targetEl) {
+            target.targetEl.classList.add("drop-target");
+            lastHoveredEl = target.targetEl;
+          } else if (target.tabEl) {
+            target.tabEl.classList.add("drop-target");
+            lastHoveredEl = target.tabEl;
+          }
+        }
       }
 
       if (target && target.preview && el.canvasDropPreview) {
@@ -594,8 +691,8 @@ function setupWindowDragAndClick(rect, client) {
         el.canvasDropPreview.style.top = `${target.preview.top}px`;
         el.canvasDropPreview.style.width = `${target.preview.width}px`;
         el.canvasDropPreview.style.height = `${target.preview.height}px`;
-        if (el.dropPreviewIcon) el.dropPreviewIcon.textContent = target.icon || "󱂬";
-        if (el.dropPreviewLabel) el.dropPreviewLabel.textContent = target.label || "Split";
+        if (el.dropPreviewIcon) el.dropPreviewIcon.textContent = target.icon || "⇄";
+        if (el.dropPreviewLabel) el.dropPreviewLabel.textContent = target.label || "Action";
       } else if (el.canvasDropPreview) {
         el.canvasDropPreview.classList.remove("active");
       }
@@ -605,12 +702,19 @@ function setupWindowDragAndClick(rect, client) {
   const onPointerUp = async (e) => {
     if (!isDragging) return;
     isDragging = false;
+    state.drag.active = false;
+    clearHoverTargets();
     rect.classList.remove("dragging");
-    rect.style.transform = "";
     if (el.canvasDropPreview) el.canvasDropPreview.classList.remove("active");
 
+    if (state.drag.renderPending) {
+      state.drag.renderPending = false;
+      renderWorkspaces();
+      renderCanvas();
+    }
+
     if (!hasMoved) {
-      // It was a tap/click! Open window action sheet
+      rect.style.transform = "";
       openWindowActionSheet(client);
       return;
     }
@@ -620,27 +724,10 @@ function setupWindowDragAndClick(rect, client) {
     lastTargetKey = null;
 
     if (target) {
-      if (target.type === "split") {
-        haptic(30);
-        showToast(`Splitting with ${target.title}...`);
-        try {
-          await api("/api/desktop", {
-            method: "POST",
-            body: JSON.stringify({
-              action: "split",
-              address: client.address,
-              targetAddress: target.targetAddress,
-              direction: target.direction
-            })
-          });
-          showToast("Window split!");
-          setTimeout(syncDesktopState, 150);
-        } catch (err) {
-          showToast("Split failed: " + err.message);
-        }
-      } else if (target.type === "swap") {
-        haptic(30);
-        showToast("Swapping windows...");
+      rect.style.transform = "";
+      if (target.type === "swap") {
+        haptic(35);
+        showToast(`Swapping with ${target.title}...`);
         try {
           await api("/api/desktop", {
             method: "POST",
@@ -655,8 +742,43 @@ function setupWindowDragAndClick(rect, client) {
         } catch (err) {
           showToast("Swap failed: " + err.message);
         }
+      } else if (target.type === "split") {
+        haptic(35);
+        showToast(`Splitting with ${target.title}...`);
+        try {
+          await api("/api/desktop", {
+            method: "POST",
+            body: JSON.stringify({
+              action: "split",
+              address: client.address,
+              targetAddress: target.targetAddress,
+              direction: target.direction
+            })
+          });
+          showToast("Layout updated!");
+          setTimeout(syncDesktopState, 150);
+        } catch (err) {
+          showToast("Split failed: " + err.message);
+        }
+      } else if (target.type === "workspace") {
+        haptic(35);
+        showToast(`Moving to Workspace ${target.workspaceId}...`);
+        try {
+          await api("/api/desktop", {
+            method: "POST",
+            body: JSON.stringify({
+              action: "move-to-workspace",
+              address: client.address,
+              workspace: target.workspaceId
+            })
+          });
+          showToast(`Moved to Workspace ${target.workspaceId}`);
+          setTimeout(syncDesktopState, 150);
+        } catch (err) {
+          showToast("Move failed: " + err.message);
+        }
       } else if (target.type === "move") {
-        haptic(20);
+        haptic(25);
         try {
           await api("/api/desktop", {
             method: "POST",
@@ -672,21 +794,46 @@ function setupWindowDragAndClick(rect, client) {
           showToast(err.message);
         }
       }
-    } else if (Math.abs(currentTranslateX) > 40 || Math.abs(currentTranslateY) > 40) {
-      const absX = Math.abs(currentTranslateX);
-      const absY = Math.abs(currentTranslateY);
-      const dir = absX > absY ? (currentTranslateX > 0 ? "r" : "l") : (currentTranslateY > 0 ? "d" : "u");
-      haptic(20);
+    } else if (client.floating) {
+      // User dragged a floating window onto free space on the monitor canvas!
+      const surfaceRect = el.monitorSurface.getBoundingClientRect();
+      const currentWs = state.selectedWorkspaceId || state.desktop?.activeWorkspace?.id || 1;
+      
+      // Calculate final center or top-left position relative to monitor surface (0 to 1)
+      const finalLeftPx = (rect.offsetLeft || 0) + currentTranslateX;
+      const finalTopPx = (rect.offsetTop || 0) + currentTranslateY;
+      
+      const relX = Math.max(0.01, Math.min(0.95, finalLeftPx / surfaceRect.width));
+      const relY = Math.max(0.01, Math.min(0.95, finalTopPx / surfaceRect.height));
+
+      haptic(25);
+      showToast("Repositioned floating window");
+      rect.style.transform = "";
+
       try {
         await api("/api/desktop", {
           method: "POST",
-          body: JSON.stringify({ action: "move", address: client.address, direction: dir })
+          body: JSON.stringify({
+            action: "drop",
+            address: client.address,
+            workspace: currentWs,
+            x: relX,
+            y: relY
+          })
         });
-        showToast(`Moved window ${dir.toUpperCase()}`);
         setTimeout(syncDesktopState, 150);
       } catch (err) {
-        showToast(err.message);
+        showToast("Move failed: " + err.message);
+        syncDesktopState();
       }
+    } else {
+      // Smoothly snap tiled window back to origin if no target
+      rect.style.transition = "transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1)";
+      rect.style.transform = "translate3d(0, 0, 0)";
+      setTimeout(() => {
+        rect.style.transition = "";
+        rect.style.transform = "";
+      }, 240);
     }
   };
 
@@ -765,6 +912,37 @@ function closeWindowActionSheet() {
 el.btnCloseWindowSheet.addEventListener("click", closeWindowActionSheet);
 el.modalWindowActions.addEventListener("click", (e) => {
   if (e.target === el.modalWindowActions) closeWindowActionSheet();
+});
+
+el.btnToggleSplit?.addEventListener("click", async () => {
+  haptic();
+  showToast("Toggling split layout...");
+  try {
+    await api("/api/desktop", {
+      method: "POST",
+      body: JSON.stringify({ action: "togglesplit" })
+    });
+    setTimeout(syncDesktopState, 150);
+  } catch (err) {
+    showToast(err.message);
+  }
+});
+
+el.btnActionToggleSplit?.addEventListener("click", async () => {
+  const win = state.selectedWindow;
+  if (!win || !win.address) return;
+  haptic();
+  closeWindowActionSheet();
+  try {
+    await api("/api/desktop", {
+      method: "POST",
+      body: JSON.stringify({ action: "togglesplit", address: win.address })
+    });
+    showToast("Toggled split layout");
+    setTimeout(syncDesktopState, 150);
+  } catch (err) {
+    showToast(err.message);
+  }
 });
 
 el.btnActionFocus.addEventListener("click", async () => {
@@ -1585,8 +1763,10 @@ function init() {
   }).catch(() => {});
   connectSSE();
   syncDesktopState();
-  // Poll fallback
-  setInterval(syncDesktopState, 2500);
+  // Poll fallback: only while the SSE stream is down
+  setInterval(() => {
+    if (!state.sseActive) syncDesktopState();
+  }, 2500);
 }
 
 init();
