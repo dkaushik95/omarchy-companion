@@ -18,7 +18,7 @@ pkill -f "uinput-helper" 2>/dev/null || true
 
 mkdir -p "$data_dir" "$plugin_dir" "$service_dir"
 cp -R "$source_dir/server" "$source_dir/web" "$data_dir/"
-cp "$source_dir/panel/manifest.json" "$source_dir/panel/Panel.qml" "$plugin_dir/"
+cp "$source_dir/manifest.json" "$source_dir/Panel.qml" "$plugin_dir/"
 
 # Compile virtual mouse uinput helper
 if command -v gcc >/dev/null 2>&1; then

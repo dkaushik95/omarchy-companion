@@ -48,6 +48,13 @@ The install script:
 - Installs and enables the systemd user service `omarchy-companion.service`.
 - Installs and enables the Omarchy Quickshell bar widget `custom.omarchy-companion`.
 
+The repo root is itself a valid Omarchy plugin, so the bar widget can also be
+installed directly with the standard plugin tooling:
+
+```bash
+omarchy plugin add <this-repo-git-url> --enable
+```
+
 ## Connecting from your Phone
 
 1. Click the phone icon in the right side of the Omarchy top bar.
