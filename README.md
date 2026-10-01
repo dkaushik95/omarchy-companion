@@ -30,10 +30,10 @@ Omarchy Companion is a phone companion Progressive Web App (PWA) built specifica
    - **iOS Missing Keys**: Quick buttons for keys not found on mobile keyboards: `Esc`, `Tab`, `Super` (Windows key), `Alt+Tab`, `Ctrl+C`, `Ctrl+V`, `Ctrl+Z`, `Enter`, `Backspace`, and Arrow keys.
    - **Send Text to PC**: Type text on your phone and send it directly to the active cursor on the PC using `wtype`.
 
-5. **Controls Tab (PC Audio, Media, Tools & Power)**
+5. **Controls Tab (PC Audio, Quick Tools & Power)**
+   - Unified single-view controls without clutter or section headings.
    - **Audio & Master Volume**: Interactive volume slider with percentage badge, mute toggle (`󰕾`/`󰝟`), and quick step buttons (`-10%`, `-5%`, `25%`, `50%`, `75%`, `+5%`, `+10%`).
-   - **Media Playback**: Control your active media player (Spotify, browser, mpv) with Play/Pause, Next Track, Previous Track, and Stop.
-   - **Display & Quick Tools**: Instant Fullscreen Screenshot, Night Light toggle, Do Not Disturb (silence notifications), and Display Sleep/Wake (`dpms`).
+   - **Quick Tools**: Stay Awake toggle (`󰅶`), Night Light toggle (`󰔎`), and Do Not Disturb / Silence Notifications (`󰂛`).
    - **System & Power**: Lock PC, Sleep/Suspend, Reboot (with confirmation), and Shut Down (with confirmation).
 
 ## Installation & Setup

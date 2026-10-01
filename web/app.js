@@ -89,7 +89,6 @@ const el = {
   volMuteIcon: document.getElementById("vol-mute-icon"),
   volSlider: document.getElementById("vol-slider"),
   quickVolBtns: document.querySelectorAll(".quick-vol-btn"),
-  mediaBtns: document.querySelectorAll(".media-btn[data-media-action]"),
   powerBtns: document.querySelectorAll(".power-btn[data-power-action]"),
   toastContainer: document.getElementById("toast-container")
 };
@@ -1654,6 +1653,18 @@ async function loadControlsState() {
       el.btnVolMute.classList.toggle("muted", data.muted);
       if (el.volMuteIcon) el.volMuteIcon.textContent = data.muted ? "󰝟" : "󰕾";
     }
+    if (data.idle !== undefined) {
+      const btn = document.querySelector('.toggle-btn[data-action="toggle-idle"]');
+      if (btn) btn.classList.toggle("active", Boolean(data.idle));
+    }
+    if (data.nightlight !== undefined) {
+      const btn = document.querySelector('.toggle-btn[data-action="toggle-nightlight"]');
+      if (btn) btn.classList.toggle("active", Boolean(data.nightlight));
+    }
+    if (data.dnd !== undefined) {
+      const btn = document.querySelector('.toggle-btn[data-action="toggle-notifications"]');
+      if (btn) btn.classList.toggle("active", Boolean(data.dnd));
+    }
   } catch {}
 }
 
@@ -1711,23 +1722,14 @@ el.quickVolBtns?.forEach(btn => {
   });
 });
 
-// Media Controls
-el.mediaBtns?.forEach(btn => {
-  btn.addEventListener("click", async () => {
-    const action = btn.dataset.mediaAction;
-    await sendControlAction(action);
-    const label = btn.querySelector(".media-label")?.textContent || "Media";
-    showToast(`${label} sent to PC`);
-  });
-});
-
 // Quick Tools Toggles
 el.toggleBtns?.forEach(btn => {
   btn.addEventListener("click", async () => {
     const action = btn.dataset.action;
     await sendControlAction(action);
     const name = btn.querySelector(".toggle-name")?.textContent || "Action";
-    showToast(`${name} executed`);
+    showToast(`${name} toggled`);
+    setTimeout(loadControlsState, 350);
   });
 });
 
@@ -1748,10 +1750,20 @@ el.powerBtns?.forEach(btn => {
   });
 });
 
-// PWA Service Worker Registration
+// PWA Service Worker Registration & Instant Update
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/sw.js").catch(() => {});
+    navigator.serviceWorker.register("/sw.js").then((reg) => {
+      reg.update().catch(() => {});
+    }).catch(() => {});
+  });
+
+  let refreshing = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (!refreshing) {
+      refreshing = true;
+      window.location.reload();
+    }
   });
 }
 

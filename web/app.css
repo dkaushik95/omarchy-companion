@@ -61,7 +61,7 @@
   --radius-xl: 0px;
   --radius-full: 0px;
 
-  --nav-height: 76px;
+  --nav-height: 64px;
 }
 
 * {
@@ -72,23 +72,38 @@
   user-select: none;
 }
 
+html {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: var(--bg-primary);
+}
+
 body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
   background-color: var(--bg-primary);
   color: var(--text-primary);
   font-family: var(--font-sans);
   line-height: 1.4;
-  overflow-x: hidden;
-  height: 100vh;
-  height: 100dvh;
-  display: flex;
-  flex-direction: column;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 #root {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   display: flex;
   flex-direction: column;
-  height: 100%;
-  position: relative;
   overflow: hidden;
 }
 
@@ -174,7 +189,8 @@ body {
   min-height: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  padding: 0 0 calc(var(--nav-height) + var(--safe-bottom) + 24px) 0;
+  overscroll-behavior-y: contain;
+  padding: 0 0 20px 0;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -182,7 +198,7 @@ body {
 
 .main-content.interactions-mode {
   overflow: hidden;
-  padding-bottom: calc(var(--nav-height) + var(--safe-bottom) + 6px);
+  padding-bottom: 0;
 }
 
 /* Workspaces Section - Completely Flush */
@@ -979,24 +995,27 @@ body {
 
 .quick-toggles-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 10px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
 }
 
 .toggle-btn {
-  height: 60px;
+  height: 64px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   display: flex;
+  flex-direction: column;
   align-items: center;
-  padding: 0 18px;
-  gap: 12px;
+  justify-content: center;
+  padding: 6px 4px;
+  gap: 5px;
   color: var(--text-primary);
-  font-size: 15px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
   transition: all 0.15s;
+  text-align: center;
 }
 
 .toggle-btn:active {
@@ -1004,21 +1023,31 @@ body {
   background: var(--bg-tertiary);
 }
 
+.toggle-btn.active {
+  background: rgba(120, 180, 255, 0.14);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .toggle-icon {
   font-family: var(--font-nerd);
-  font-size: 22px;
+  font-size: 20px;
   color: var(--accent);
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
+.controls-divider {
+  height: 1px;
+  background: var(--border-subtle);
+  margin: 4px 0;
+}
+
 /* Bottom Navigation Bar */
 .bottom-nav {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
+  flex-shrink: 0;
+  width: 100%;
   height: calc(var(--nav-height) + var(--safe-bottom));
   padding-bottom: var(--safe-bottom);
   background: rgba(11, 13, 18, 0.96);
@@ -1681,6 +1710,9 @@ body {
   padding: 3px 10px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-subtle);
+  min-width: 48px;
+  text-align: center;
+  flex-shrink: 0;
 }
 
 .volume-control-box {

@@ -10,7 +10,7 @@
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="apple-touch-icon" href="/api/logo">
     <link rel="icon" type="image/png" href="/api/logo">
-    <link rel="stylesheet" href="/app.css?v=21">
+    <link rel="stylesheet" href="/app.css?v=24">
     <title>Omarchy Companion</title>
   </head>
   <body>
@@ -117,22 +117,16 @@
           </div>
         </section>
 
-        <!-- Tab 3: Controls (Volume, Media, Tools, Panels, Power) -->
+        <!-- Tab 3: Controls (Unified View) -->
         <section class="tab-panel" id="tab-panel-controls">
-          <!-- Audio & Volume Card -->
           <div class="panel-card control-card">
-            <div class="card-header">
-              <div class="card-title-row">
-                <span class="card-title">Audio & Volume</span>
-                <span class="volume-badge" id="volume-badge">60%</span>
-              </div>
-              <span class="card-subtitle">PC master volume and mute</span>
-            </div>
+            <!-- Audio & Volume -->
             <div class="volume-control-box">
               <button class="vol-mute-btn" id="btn-vol-mute" title="Toggle Mute">
                 <span id="vol-mute-icon">󰕾</span>
               </button>
               <input type="range" class="vol-slider" id="vol-slider" min="0" max="100" value="60" step="1">
+              <span class="volume-badge" id="volume-badge">60%</span>
             </div>
             <div class="quick-vol-buttons">
               <button class="quick-vol-btn" data-vol-step="-10">-10%</button>
@@ -143,43 +137,14 @@
               <button class="quick-vol-btn" data-vol-step="+5">+5%</button>
               <button class="quick-vol-btn" data-vol-step="+10">+10%</button>
             </div>
-          </div>
 
-          <!-- Media Playback Card -->
-          <div class="panel-card control-card">
-            <div class="card-header">
-              <span class="card-title">Media Playback</span>
-              <span class="card-subtitle">Control music, video, and active player</span>
-            </div>
-            <div class="media-controls-grid">
-              <button class="media-btn" data-media-action="media-prev" title="Previous Track">
-                <span class="media-icon">󰒮</span>
-                <span class="media-label">Previous</span>
-              </button>
-              <button class="media-btn media-btn-primary" data-media-action="media-play-pause" title="Play / Pause">
-                <span class="media-icon" id="media-play-icon">󰐊</span>
-                <span class="media-label">Play / Pause</span>
-              </button>
-              <button class="media-btn" data-media-action="media-next" title="Next Track">
-                <span class="media-icon">󰒭</span>
-                <span class="media-label">Next</span>
-              </button>
-              <button class="media-btn" data-media-action="media-stop" title="Stop">
-                <span class="media-icon">󰓛</span>
-                <span class="media-label">Stop</span>
-              </button>
-            </div>
-          </div>
+            <div class="controls-divider"></div>
 
-          <!-- Quick Display & Tools -->
-          <div class="panel-card control-card">
-            <div class="card-header">
-              <span class="card-title">Display & Quick Tools</span>
-            </div>
+            <!-- Quick Toggles -->
             <div class="quick-toggles-grid">
-              <button class="toggle-btn" data-action="screenshot">
-                <span class="toggle-icon">󰹑</span>
-                <span class="toggle-name">Screenshot</span>
+              <button class="toggle-btn" data-action="toggle-idle">
+                <span class="toggle-icon">󰅶</span>
+                <span class="toggle-name">Stay Awake</span>
               </button>
               <button class="toggle-btn" data-action="toggle-nightlight">
                 <span class="toggle-icon">󰔎</span>
@@ -189,18 +154,11 @@
                 <span class="toggle-icon">󰂛</span>
                 <span class="toggle-name">Silence DND</span>
               </button>
-              <button class="toggle-btn" data-action="toggle-dpms">
-                <span class="toggle-icon">󰍹</span>
-                <span class="toggle-name">Toggle Display</span>
-              </button>
             </div>
-          </div>
 
-          <!-- Power & System Card -->
-          <div class="panel-card control-card">
-            <div class="card-header">
-              <span class="card-title">System & Power</span>
-            </div>
+            <div class="controls-divider"></div>
+
+            <!-- System & Power -->
             <div class="power-controls-grid">
               <button class="power-btn" data-power-action="lock">
                 <span class="power-icon"></span>
@@ -220,7 +178,6 @@
               </button>
             </div>
           </div>
-
         </section>
       </main>
 
@@ -337,6 +294,6 @@
       <div class="toast-container" id="toast-container"></div>
     </div>
 
-    <script type="module" src="/app.js?v=27"></script>
+    <script type="module" src="/app.js?v=32"></script>
   </body>
 </html>

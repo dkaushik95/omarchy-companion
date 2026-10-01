@@ -1237,7 +1237,22 @@ async function getControlsState() {
     }
   } catch {}
 
-  return { volume, muted, nightlight };
+  let idle = false;
+  try {
+    const idleRes = await run("omarchy", ["toggle", "idle", "status"]);
+    if (idleRes.ok) {
+      const parsed = JSON.parse(idleRes.stdout);
+      idle = Boolean(parsed.enabled);
+    }
+  } catch {}
+
+  let dnd = false;
+  try {
+    const dndRes = await run("omarchy", ["toggle", "enabled", "notification-silencing"]);
+    dnd = dndRes.ok;
+  } catch {}
+
+  return { volume, muted, nightlight, idle, dnd };
 }
 
 async function executeControlAction(action, payload = {}) {
@@ -1276,6 +1291,13 @@ async function executeControlAction(action, payload = {}) {
     }
     case "media-stop": {
       await run("wtype", ["-k", "XF86AudioStop"]);
+      return { ok: true };
+    }
+    case "toggle-idle":
+    case "toggle-stay-awake": {
+      await run("omarchy", ["toggle", "idle"]).catch(() => {
+        return run("omarchy-toggle-idle");
+      });
       return { ok: true };
     }
     case "toggle-nightlight": {
